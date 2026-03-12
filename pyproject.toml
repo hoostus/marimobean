@@ -1,0 +1,13 @@
+[project]
+name = "marimo-notebooks"
+version = "0.1.0"
+description = "Marimo notebooks for exploring beancount data."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beancount>=3.2.0",
+    "beanquery>=0.3.0.dev0",
+    "evbeantools>=0.1.0",
+    "marimo>=0.20.4",
+    "pandas>=2.3.3",
+]
