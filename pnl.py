@@ -33,7 +33,7 @@ def _(mo, run_query):
     _df = run_query(_bql)
 
     year_slider = mo.ui.range_slider(
-        start=_df[1]['year'].item(),
+        start=_df[0]['year'].item(),
         stop=_df[-1]['year'].item(),
         full_width=True)
     return (year_slider,)
@@ -85,6 +85,80 @@ def _(mo):
 
 
 @app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # P&L Explainer
+
+    See https://www.gainstrack.com/pnlexplain as example of what we're trying to do here
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    We need to build
+
+    - opening networth for each period (beginning of month) and show % change from previous period
+    - also show average and total
+
+    Below is a detailed view of the change in net worth
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo, options):
+    currency = mo.ui.dropdown(options['operating_currency'], value=options['operating_currency'][0], label='Currency for report: ')
+    currency
+    return (currency,)
+
+
+@app.cell(hide_code=True)
+def _(currency, datetime, dateutil, end_year, pl, run_query, start_year):
+    # This is extraordinarily slow. Need to make it faster. Almost 6 seconds just for ~7 years of data.
+
+    _currency = currency.value
+
+    _start = datetime.datetime(start_year, 1, 1)
+    _end = datetime.datetime(end_year, 12, 31)
+    _nws = []
+    for dt in dateutil.rrule.rrule(dtstart=_start, freq=dateutil.rrule.MONTHLY, until=_end):
+        _date_iso = dt.date().isoformat()
+        _q = f"""
+            SELECT convert(SUM(position),'{_currency}',{_date_iso}) as amount
+            where date <= {_date_iso} AND account ~ 'Assets|Liabilities'
+        """
+        _df = run_query(_q)
+        _nws.append((_date_iso, _df['amount (USD)'].item()))
+
+    nw_df = pl.DataFrame(data=_nws,
+                         schema=['date', 'amount'],
+                         orient='row').with_columns(pl.col('amount').pct_change().alias('percent_change'))
+    return (nw_df,)
+
+
+@app.cell(hide_code=True)
+def _(alt, mo, nw_df):
+    _start = nw_df[0]['date'].item()
+    _end = nw_df[-1]['date'].item()
+
+    _amt = alt.Chart(nw_df).mark_bar(opacity=0.3, color='#57A44C').encode(x='date', y='amount')
+    _pct = alt.Chart(nw_df).mark_line().encode(x='date', y='percent_change')
+
+    mo.ui.altair_chart(alt.layer(_amt, _pct).resolve_scale(y='independent').properties(title=f'Net Worth: {_start} - {_end}'))
+    return
+
+
+@app.cell(hide_code=True)
+def _(nw_df):
+    _n = nw_df #.transpose(include_header=True)
+    _n.style.tab_header(title='P&L', subtitle='with monthly change')
+    _n.style.fmt_percent("percent_change").fmt_currency("amount").tab_header('Net Worth')
+    return
+
+
+@app.cell(hide_code=True)
 def _(entries, options, pl, run_bql_query):
     def run_query(query):
         """ Convert a beancount BQL query result to a polars dataframe """
@@ -114,10 +188,11 @@ def _():
     from beanquery.query import run_query as run_bql_query
 
     import datetime
+    import dateutil.rrule
     from pathlib import Path
 
     home_dir = Path.home()
-    return alt, load_file, mo, pl, printer, run_bql_query
+    return alt, datetime, dateutil, load_file, mo, pl, printer, run_bql_query
 
 
 if __name__ == "__main__":
