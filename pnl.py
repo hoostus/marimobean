@@ -56,7 +56,7 @@ def _(end_year, run_query, start_year):
 
 @app.cell(hide_code=True)
 def _(mo):
-    group_by = mo.ui.dropdown(['Annual', 'Quarter', 'Month', 'Week'], label='Choose reporting grouping.', value='Month')
+    group_by = mo.ui.dropdown(['Year', 'Quarter', 'Month', 'Week'], label='Choose reporting grouping.', value='Month')
     group_by
     return (group_by,)
 
@@ -66,13 +66,13 @@ def _(alt, end_year, group_by, mo, pl, run_query, start_year):
     _bql = f"""select * where account ~ 'Expenses' and year >= {start_year} and year <= {end_year}"""
 
     match group_by.value:
-        case 'Annual': _every = '1y'
+        case 'Year': _every = '1y'
         case 'Quarter': _every= '1q'
         case 'Month': _every = '1mo'
         case 'Week': _every = '1w'
 
     _df = run_query(_bql).group_by_dynamic('date', every=_every).agg(pl.col('position (USD)').sum())
-    mo.ui.altair_chart(alt.Chart(_df).mark_bar().encode(x='date', y='position (USD)').properties(title='Monthly Expenses'))
+    mo.ui.altair_chart(alt.Chart(_df).mark_bar().encode(x='date', y='position (USD)').properties(title=f'Expenses by {group_by.value}'))
     return
 
 
