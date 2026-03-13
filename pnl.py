@@ -6,9 +6,7 @@ app = marimo.App(width="medium")
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""
-    /// Attention | Edit to point to your beancount file.
-    """)
+    mo.md(r"""/// Attention | Edit this to point to your beancount file if you want to try on real data.""") if mo.app_meta().mode == 'edit' else None
     return
 
 
@@ -58,22 +56,31 @@ def _(end_year, run_query, start_year):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""
-    /// Admonition | This is also controlled by the year slider above.
-    """)
+    group_by = mo.ui.dropdown(['Annual', 'Quarter', 'Month', 'Week'], label='Choose reporting grouping.', value='Month')
+    group_by
+    return (group_by,)
+
+
+@app.cell(hide_code=True)
+def _(alt, end_year, group_by, mo, pl, run_query, start_year):
+    _bql = f"""select * where account ~ 'Expenses' and year >= {start_year} and year <= {end_year}"""
+
+    match group_by.value:
+        case 'Annual': _every = '1y'
+        case 'Quarter': _every= '1q'
+        case 'Month': _every = '1mo'
+        case 'Week': _every = '1w'
+
+    _df = run_query(_bql).group_by_dynamic('date', every=_every).agg(pl.col('position (USD)').sum())
+    mo.ui.altair_chart(alt.Chart(_df).mark_bar().encode(x='date', y='position (USD)').properties(title='Monthly Expenses'))
     return
 
 
 @app.cell(hide_code=True)
-def _(alt, end_year, mo, pl, run_query, start_year):
-    _bql = f"""select * where account ~ 'Expenses' and year >= {start_year} and year <= {end_year}"""
-
-    #cols, rows = run_bql_query(entries, options, _bql, numberify=True)
-    #schema = [k.name for k in cols]
-    #df = pl.DataFrame(schema=schema, data=rows, orient='row', infer_schema_length=None)
-
-    _df = run_query(_bql).group_by_dynamic('date', every='1mo').agg(pl.col('position (USD)').sum())
-    mo.ui.altair_chart(alt.Chart(_df).mark_bar().encode(x='date', y='position (USD)').properties(title='Monthly Expenses'))
+def _(mo):
+    mo.md(r"""
+    /// Admonition | This is also controlled by the year slider above.
+    """)
     return
 
 
@@ -108,9 +115,6 @@ def _():
 
     import datetime
     from pathlib import Path
-
-    import panel as pn
-    pn.extension()
 
     home_dir = Path.home()
     return alt, load_file, mo, pl, printer, run_bql_query
