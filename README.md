@@ -31,3 +31,6 @@ read-only version of the notebook is suitable for serving as a simple app
 to non-technical users.
 
 # Example Beancount Files
+
+There are example beancount files provided from the [fava](https://github.com/beancount/fava)
+project to let you get started right away with examples and demos.

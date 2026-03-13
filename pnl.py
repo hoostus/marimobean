@@ -29,9 +29,29 @@ def _(mo):
     return
 
 
-@app.cell
-def _(run_query):
-    _bql = """select * where account ~ 'Income'"""
+@app.cell(hide_code=True)
+def _(mo, run_query):
+    _bql = """select year,month order by date"""
+    _df = run_query(_bql)
+
+    year_slider = mo.ui.range_slider(
+        start=_df[1]['year'].item(),
+        stop=_df[-1]['year'].item(),
+        full_width=True)
+    return (year_slider,)
+
+
+@app.cell(hide_code=True)
+def _(mo, year_slider):
+    mo.vstack([mo.md(f"Years selected to query: {year_slider.value[0]} - {year_slider.value[1]}"), year_slider])
+    return
+
+
+@app.cell(hide_code=True)
+def _(run_query, year_slider):
+    _start = year_slider.value[0]
+    _end = year_slider.value[1]
+    _bql = f"""select * where account ~ 'Income' and year >= {_start} and year <= {_end}"""
     run_query(_bql)
     return
 
@@ -58,12 +78,18 @@ def _(beancount_file, load_file, printer):
 @app.cell(hide_code=True)
 def _():
     import marimo as mo
+    import altair as alt
+    import polars as pl
+
     from beancount.loader import load_file
     from beancount.parser import printer
     from beanquery.query import run_query as run_bql_query
+
+    import datetime
     from pathlib import Path
-    import altair as alt
-    import polars as pl
+
+    import panel as pn
+    pn.extension()
 
     home_dir = Path.home()
     return load_file, mo, pl, printer, run_bql_query
