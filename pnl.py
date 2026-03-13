@@ -43,16 +43,37 @@ def _(mo, run_query):
 
 @app.cell(hide_code=True)
 def _(mo, year_slider):
-    mo.vstack([mo.md(f"Years selected to query: {year_slider.value[0]} - {year_slider.value[1]}"), year_slider])
+    start_year = year_slider.value[0]
+    end_year = year_slider.value[1]
+    mo.vstack([mo.md(f"Years selected to query: {start_year} - {end_year}"), year_slider])
+    return end_year, start_year
+
+
+@app.cell(hide_code=True)
+def _(end_year, run_query, start_year):
+    _bql = f"""select * where account ~ 'Income' and year >= {start_year} and year <= {end_year}"""
+    run_query(_bql)
     return
 
 
 @app.cell(hide_code=True)
-def _(run_query, year_slider):
-    _start = year_slider.value[0]
-    _end = year_slider.value[1]
-    _bql = f"""select * where account ~ 'Income' and year >= {_start} and year <= {_end}"""
-    run_query(_bql)
+def _(mo):
+    mo.md(r"""
+    /// Admonition | This is also controlled by the year slider above.
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(alt, end_year, mo, pl, run_query, start_year):
+    _bql = f"""select * where account ~ 'Expenses' and year >= {start_year} and year <= {end_year}"""
+
+    #cols, rows = run_bql_query(entries, options, _bql, numberify=True)
+    #schema = [k.name for k in cols]
+    #df = pl.DataFrame(schema=schema, data=rows, orient='row', infer_schema_length=None)
+
+    _df = run_query(_bql).group_by_dynamic('date', every='1mo').agg(pl.col('position (USD)').sum())
+    mo.ui.altair_chart(alt.Chart(_df).mark_bar().encode(x='date', y='position (USD)').properties(title='Monthly Expenses'))
     return
 
 
@@ -62,7 +83,7 @@ def _(entries, options, pl, run_bql_query):
         """ Convert a beancount BQL query result to a polars dataframe """
         cols, rows = run_bql_query(entries, options, query, numberify=True)
         schema = [k.name for k in cols]
-        df = pl.DataFrame(schema=schema, data=rows, orient='row')
+        df = pl.DataFrame(schema=schema, data=rows, orient='row', infer_schema_length=None)
         return df
 
     return (run_query,)
@@ -92,7 +113,7 @@ def _():
     pn.extension()
 
     home_dir = Path.home()
-    return load_file, mo, pl, printer, run_bql_query
+    return alt, load_file, mo, pl, printer, run_bql_query
 
 
 if __name__ == "__main__":
