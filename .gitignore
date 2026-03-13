@@ -5,6 +5,8 @@ build/
 dist/
 wheels/
 *.egg-info
+*.picklecache
 
 # Virtual environments
 .venv
+__marimo__
