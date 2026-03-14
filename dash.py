@@ -54,19 +54,6 @@ def _(pl, pmt_raw_aud, pmt_tilt_aud):
 
 @app.cell(hide_code=True)
 def _(mo):
-    mo.md(r"""/// Attention | Edit this to point to your beancount file if you want to try on real data.""") if mo.app_meta().mode == 'edit' else None
-    return
-
-
-@app.cell
-def _(home_dir):
-    beancount_file = f'{home_dir}/Documents/beancount/my.bean'
-    #beancount_file = 'huge-example.beancount'
-    return (beancount_file,)
-
-
-@app.cell(hide_code=True)
-def _(mo):
     mo.md(r"""
     /// admonition | We only consider accounts with the metadata *include_in_dash* set to *true*
 
@@ -199,6 +186,19 @@ def _():
         pv,
         run_bql_query,
     )
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""/// Attention | Edit this to point to your beancount file if you want to try on real data.""") if mo.app_meta().mode == 'edit' else None
+    return
+
+
+@app.cell
+def _(home_dir):
+    beancount_file = f'{home_dir}/Documents/beancount/my.bean'
+    #beancount_file = 'huge-example.beancount'
+    return (beancount_file,)
 
 
 if __name__ == "__main__":
