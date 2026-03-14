@@ -24,6 +24,13 @@ handle installing the dependencies in a virtual environment for you.
 The top of each file will have a variable ```beancount_file``` which you
 will need to edit to point to your actual beancount file.
 
+## template.py
+
+If you want to create your own, you can copy this file which has a few cells
+to help you get up and running quickly.
+
+```cp template.py my_taxes.py```
+
 ## marimo edit vs marimo run
 
 *marimo edit* allows you to edit the notebook, *marimo run* doesn't. This
