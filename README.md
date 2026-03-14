@@ -1,3 +1,6 @@
+![screen shot of PNL notebook](https://github.com/hoostus/marimobean/blob/main/screenshot-1.png?raw=true)
+![screen shot of Annual Expense Comparison notebook](https://github.com/hoostus/marimobean/blob/main/screenshot-2.png?raw=true)
+
 # Quickstart
 
 1. Install uv, if not already installed.
