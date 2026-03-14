@@ -23,6 +23,27 @@ def _(df, pn):
     return
 
 
+@app.cell
+def _(run_query):
+    balances = run_query(f"""
+    select date, amount from #balances
+    where account in
+                (select account from #accounts where open.meta['include_in_dash'] = 'true')
+    and currency(amount) != 'AUD' and currency(amount) != 'USD'
+    order by date
+    """)
+
+    dividends = run_query(f"""
+    select account,date,weight
+    from #postings
+    where account ~ 'Income:Dividends'
+    order by date
+    """)
+
+    dividends.join_asof(balances, on='date', strategy='backward')
+    return
+
+
 @app.cell(hide_code=True)
 def _(pl, pmt_raw_aud, pmt_tilt_aud):
     df = pl.DataFrame(data={'Tilt PMT': pmt_tilt_aud, 'Raw PMT': pmt_raw_aud})
@@ -60,12 +81,11 @@ def _(mo):
 @app.cell(hide_code=True)
 def _(get_price, run_query):
     def get_nw():
-        q = f"""
+        df = run_query(f"""
             select convert(sum(position), 'USD', today()) as amount
             where account in
                 (select account from #accounts where open.meta['include_in_dash'] = 'true')
-        """
-        df = run_query(q)
+        """)
         usd = df['amount (USD)'].item()
         # beancount can't convert FSS_INTL to USD (only to AUD) because it doesn't do transitive conversions...
         fss = df['amount (FSS_INTL)'].item()
@@ -78,10 +98,9 @@ def _(get_price, run_query):
 
 @app.cell(hide_code=True)
 def _(datetime, mo, run_query):
-    _q = f"""
+    _df = run_query(f"""
         select * from #prices;
-    """
-    _df = run_query(_q)
+    """)
 
     most_recent_price = _df.sort('date').group_by('currency').last()
     def get_price(commodity):
