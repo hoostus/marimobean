@@ -16,20 +16,21 @@ These are a collection of [Marimo](https://marimo.io/) notebooks that showcase e
 [beancount](https://beancount.github.io/docs/) plaintext accounting data in various ways.
 
 All of them should be runnable from this directory
-directly with [uv] (https://docs.astral.sh/uv/) which will
+directly with [uv](https://docs.astral.sh/uv/) which will
 handle installing the dependencies in a virtual environment for you.
 
 ```uv run marimo edit <filename.py>```
 
-The top of each file will have a variable ```beancount_file``` which you
-will need to edit to point to your actual beancount file.
+Somewhere in each file should be a variable ```beancount_file``` (or similar)
+which you will need to edit to point to your actual beancount file if you want
+to use non-demo data.
 
 ## template.py
 
 If you want to create your own, you can copy this file which has a few cells
 to help you get up and running quickly.
 
-```cp template.py my_taxes.py```
+```cp template.py my_experiment.py```
 
 ## marimo edit vs marimo run
 
