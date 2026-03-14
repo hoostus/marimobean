@@ -5,12 +5,30 @@ app = marimo.App(width="medium")
 
 
 @app.cell(hide_code=True)
-def _(GT, pl, pmt_raw_aud, pmt_tilt_aud):
+def _(df, pn):
+    _a = pn.indicators.Number(
+        name = 'Tilt PMT',
+        value = df['Tilt PMT'].item(),
+        format = '${value:,.0f}',
+        colors = [(0, 'red'), (500_000, 'green')]
+    )
+
+    _b = pn.indicators.Number(
+        name = 'Raw PMT',
+        value = df['Raw PMT'].item(),
+        format = '${value:,.0f}',
+        colors = [(0, 'white'), (500_000, 'grey')]
+    )
+    pn.Row(_a, _b)
+    return
+
+
+@app.cell(hide_code=True)
+def _(pl, pmt_raw_aud, pmt_tilt_aud):
     df = pl.DataFrame(data={'Tilt PMT': pmt_tilt_aud, 'Raw PMT': pmt_raw_aud})
     df = df.with_columns(pl.all()) / 1000
     df = df.with_columns(pl.all().floor()) * 1000
-    GT(df).tab_header('Annual Withdrawal Amount').fmt_currency().data_color(columns=['Tilt PMT'], palette='Pastel1')
-    return
+    return (df,)
 
 
 @app.cell(hide_code=True)
@@ -35,7 +53,7 @@ def _(mo):
     2025-01-01 open Assets:Investing
       include_in_dash: "true"
     ```
-    """)
+    """)  if mo.app_meta().mode == 'edit' else None
     return
 
 
@@ -135,6 +153,8 @@ def _():
     import altair as alt
     import polars as pl
     from great_tables import GT
+    import panel as pn
+    pn.extension()
 
     from beancount.loader import load_file
     from beancount.parser import printer
@@ -149,13 +169,13 @@ def _():
     home_dir = Path.home()
     return (
         Decimal,
-        GT,
         datetime,
         home_dir,
         load_file,
         mo,
         pl,
         pmt,
+        pn,
         printer,
         pv,
         run_bql_query,

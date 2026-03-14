@@ -12,6 +12,7 @@ dependencies = [
     "great-tables>=0.21.0",
     "marimo>=0.20.4",
     "numpy-financial>=1.0.0",
+    "panel>=1.8.9",
     "polars>=1.39.0",
     "python-dateutil>=2.9.0.post0",
 ]
