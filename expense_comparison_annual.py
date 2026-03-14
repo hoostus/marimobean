@@ -4,131 +4,10 @@ __generated_with = "0.20.4"
 app = marimo.App(width="medium")
 
 
-@app.cell(hide_code=True)
-def _(mo):
-    mo.md("""
-    # Expense Analysis
-    """)
-    return
-
-
-@app.cell(hide_code=True)
-def _(
-    controls,
-    escape,
-    expense_tree,
-    leaf_accounts,
-    left_year,
-    left_year_value,
-    mo,
-    right_year,
-    right_year_value,
-    selected_account,
-    transactions_df,
-):
-    def format_amount(value: float, show_sign: bool = False) -> str:
-        rounded = int(round(value))
-        if show_sign:
-            sign = "+" if rounded >= 0 else "-"
-            return f"{sign}{abs(rounded):,}"
-        return f"{rounded:,}"
-
-    show_transactions = selected_account in leaf_accounts
-    transaction_table_rows = []
-
-    if show_transactions:
-        for txn_entry in transactions_df.iter_rows(named=True):
-            if str(txn_entry["year"]) not in {left_year_value, right_year_value}:
-                continue
-            if txn_entry["account"] != selected_account:
-                continue
-            transaction_table_rows.append(
-                f"""
-                <tr>
-                    <td>{escape(str(txn_entry["date"]))}</td>
-                    <td>{escape(str(txn_entry["payee"] or ""))}</td>
-                    <td>{escape(str(txn_entry["narration"] or ""))}</td>
-                    <td class="numeric">{format_amount(coerce_amount(txn_entry["amount"]), show_sign=True)}</td>
-                </tr>
-                """
-            )
-
-    transactions_view = mo.Html(
-        f"""
-        <style>
-          .expense-transactions {{
-            width: 100%;
-            max-width: 100%;
-            border-collapse: collapse;
-            font-size: 0.88rem;
-            line-height: 1.3;
-            margin-top: 1rem;
-          }}
-          .expense-transactions th,
-          .expense-transactions td {{
-            padding: 0.35rem 0.6rem;
-            border-bottom: 1px solid rgba(128, 128, 128, 0.2);
-            vertical-align: top;
-          }}
-          .expense-transactions th {{
-            text-align: left;
-            font-weight: 600;
-          }}
-          .expense-transactions .numeric {{
-            text-align: right;
-            white-space: nowrap;
-          }}
-        </style>
-        <div>
-          <table class="expense-transactions">
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Payee</th>
-                <th>Narration</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {''.join(transaction_table_rows)}
-            </tbody>
-          </table>
-        </div>
-        """
-    )
-
-    mo.hstack(
-        [
-            mo.vstack(
-                [
-                    mo.md("### Comparison"),
-                    mo.hstack([left_year, right_year], justify="start"),
-                    expense_tree,
-                    *((
-                        [
-                            mo.md("### Transactions"),
-                            mo.md(
-                                f"Showing postings booked to `{selected_account}` for {left_year_value} and {right_year_value}."
-                            ),
-                            transactions_view,
-                        ]
-                    ) if show_transactions else []),
-                ]
-            ),
-            mo.vstack([controls]),
-        ],
-        widths=[2.2, 1],
-        align="start",
-        justify="start",
-    )
-    return
-
-
 @app.cell
 def _():
     # Change this path to your ledger
-    #beancount_file = "/home/yourusername/marimobean/huge-example.beancount"
-    beancount_file = 'example.beancount'
+    beancount_file = "huge-example.beancount"
     return (beancount_file,)
 
 
@@ -183,6 +62,14 @@ def _(entries, options, pl, run_bql_query):
         )
 
     return (run_query,)
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md("""
+    # Expense Analysis
+    """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -656,6 +543,118 @@ def _(expense_tree):
     else:
         selected_account = ""
     return (selected_account,)
+
+
+@app.cell(hide_code=True)
+def _(
+    controls,
+    escape,
+    expense_tree,
+    leaf_accounts,
+    left_year,
+    left_year_value,
+    mo,
+    right_year,
+    right_year_value,
+    selected_account,
+    transactions_df,
+):
+    def format_amount(value: float, show_sign: bool = False) -> str:
+        rounded = int(round(value))
+        if show_sign:
+            sign = "+" if rounded >= 0 else "-"
+            return f"{sign}{abs(rounded):,}"
+        return f"{rounded:,}"
+
+    show_transactions = selected_account in leaf_accounts
+    transaction_table_rows = []
+
+    if show_transactions:
+        for txn_entry in transactions_df.iter_rows(named=True):
+            if str(txn_entry["year"]) not in {left_year_value, right_year_value}:
+                continue
+            if txn_entry["account"] != selected_account:
+                continue
+            transaction_table_rows.append(
+                f"""
+                <tr>
+                    <td>{escape(str(txn_entry["date"]))}</td>
+                    <td>{escape(str(txn_entry["payee"] or ""))}</td>
+                    <td>{escape(str(txn_entry["narration"] or ""))}</td>
+                    <td class="numeric">{format_amount(coerce_amount(txn_entry["amount"]), show_sign=True)}</td>
+                </tr>
+                """
+            )
+
+    transactions_view = mo.Html(
+        f"""
+        <style>
+          .expense-transactions {{
+            width: 100%;
+            max-width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+            line-height: 1.3;
+            margin-top: 1rem;
+          }}
+          .expense-transactions th,
+          .expense-transactions td {{
+            padding: 0.35rem 0.6rem;
+            border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+            vertical-align: top;
+          }}
+          .expense-transactions th {{
+            text-align: left;
+            font-weight: 600;
+          }}
+          .expense-transactions .numeric {{
+            text-align: right;
+            white-space: nowrap;
+          }}
+        </style>
+        <div>
+          <table class="expense-transactions">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Payee</th>
+                <th>Narration</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {''.join(transaction_table_rows)}
+            </tbody>
+          </table>
+        </div>
+        """
+    )
+
+    mo.hstack(
+        [
+            mo.vstack(
+                [
+                    mo.md("### Comparison"),
+                    mo.hstack([left_year, right_year], justify="start"),
+                    expense_tree,
+                    *((
+                        [
+                            mo.md("### Transactions"),
+                            mo.md(
+                                f"Showing postings booked to `{selected_account}` for {left_year_value} and {right_year_value}."
+                            ),
+                            transactions_view,
+                        ]
+                    ) if show_transactions else []),
+                ]
+            ),
+            mo.vstack([controls]),
+        ],
+        widths=[2.2, 1],
+        align="start",
+        justify="start",
+    )
+    return
 
 
 if __name__ == "__main__":
