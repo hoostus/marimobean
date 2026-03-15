@@ -4,18 +4,19 @@ __generated_with = "0.20.4"
 app = marimo.App(width="medium")
 
 
-@app.cell(disabled=True, hide_code=True)
-def _(df, pn, today, ytd_spend):
-    # For some reason running this code means the panel.Grid below doesn't get displayed
-    # in app mode(?!)
-
+@app.cell(hide_code=True)
+def _(df, mo, today, ytd_spend):
     _doy = round(today.timetuple().tm_yday / 365 * 100)
     _spend = round((ytd_spend / df['Tilt PMT'] * 100).item())
-    pn.panel(f"""# {today}
-    Date: {_doy}%
 
-    Tilt: {_spend}%
-    """)
+    if _doy >= _spend:
+        _style = 'green'
+    else:
+        _style = 'red'
+
+    mo.hstack((mo.md(f'# {today}'),
+                mo.md(f"Tilt: {_spend}%").style(color=_style),
+                mo.md(f"Date: {_doy}%").style(color='grey')))
     return
 
 
@@ -119,33 +120,35 @@ def _(run_query):
 def _(mo):
     mo.md(r"""
     # Dividend Estimates
+
+    Trying to reconstruct historical dividend yields from beancount is complicated and error-prone. Some of the issues:
+
+    1. Simply linking up the dividend with the security is not explicit in beancount. Even if you have an account *Income:Dividends:VTI* for each fund you are still relying on the heuristic of the account name being the same as the security name. What if they aren't the same?
+    2. Even if you can associate a dividend and security, getting the balance of that security via BQL is not easy. I don't think there's a simple way to do it in one query, so you're probably left iterating over things and calling BQL multiple times. As some point one beings to wonder if simply dropping into Python would be easier.
+    3. But even if you solve that, it is still error-prone because you almost certainly didn't capture the ex-div date in Beancount (as an Account-Receivable?) and only captured the actual payment date. How many shares did you own on the ex-div date...when you don't know when that was? What if you sell shares between the ex-div and payment date? What if there is a lengthy period between the ex-div date and the payment? This is the case with VEU on the ASX (Australia) which has a 1-month lag. This lag also complicates things because conceptually you want to measure things based on the ex-div (which you didn't capture in Beancount!). For instance, the payment in January is actually the Q4 dividend, no some kind of Q1 dividend. So you'd need special case code to handle all of that anyway?
+
+
+    So...just store it explicity in a beancount event:
+
+    ```
+    2025-12-31 event "dividend" "MFDX: 0.33"
+    ```
     """)
     return
 
 
 @app.cell
-def _(run_query):
-    _balances = run_query(f"""
-    select date, balance from #postings
-    where account in
-                (select account from #accounts where open.meta['include_in_dash'] = 'true')
-    order by date
-    """).fill_null(0)
-
-    _dividends = run_query(f"""
-    select account,date,abs(position) as amount
-    from #postings
-    where account ~ 'Income:Dividends'
-    order by date
+def _(pl, run_query):
+    _df = run_query(f"""
+    select * from #events where type = 'dividend'
     """)
+    _df = _df.with_columns(pl.col("description").str.split_exact(':', 1))
+    _df = _df.with_columns(pl.col("description").struct.rename_fields(['etf', 'dividend'])).unnest('description')
+    _df = _df.with_columns(pl.col('dividend').str.strip_chars())
+    _df = _df.with_columns(pl.col('dividend').cast(pl.Decimal(10, 6)))
+    _df = _df.sort('date', descending=True).group_by('etf').tail(8)
 
-    dividends = _dividends.join_asof(_balances, on='date', strategy='backward')
-
-    recent = dividends.sort('date').group_by('account').tail(8)
-
-    veu = recent.filter(recent['account'] == 'Income:Dividends:VEU')
-    veu_amt = float(veu['balance (VEU_AX)'].last())
-    veu_amt * (veu['amount (AUD)'] / veu['balance (VEU_AX)']).mean()
+    _df['date'].dt.quarter()
     return
 
 
@@ -276,6 +279,7 @@ def _():
     from beancount.loader import load_file
     from beancount.parser import printer
     from beanquery.query import run_query as run_bql_query
+    from beancount.core import data
 
     import datetime
     from pathlib import Path
