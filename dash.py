@@ -5,43 +5,151 @@ app = marimo.App(width="medium")
 
 
 @app.cell(hide_code=True)
-def _(df, pn):
-    _a = pn.indicators.Number(
+def _(df, pn, today, ytd_spend):
+    _doy = round(today.timetuple().tm_yday / 365 * 100)
+    _spend = round((ytd_spend / df['Tilt PMT'] * 100).item())
+    pn.panel(f"""# {today}
+    Date: {_doy}%
+
+    Tilt: {_spend}%
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(df, pl, pn, projected, ytd_spend):
+    _ytd = pn.indicators.Number(
+        name = 'YTD Spend',
+        value = ytd_spend.item(),
+        format = '${value:,.0f}',
+        colors = [(0, 'red'), (500_000, 'green')]
+    )
+
+    _p = projected / 1000
+    _p = _p.with_columns(pl.all().floor()) * 1000
+
+    _projected = pn.indicators.Number(
+        name = 'Projected Spend',
+        value = _p.item(),
+        format = '${value:,.0f}',
+        colors = [(0, 'white'), (500_000, 'grey')]
+    )
+
+    _tiltpmt = pn.indicators.Number(
         name = 'Tilt PMT',
         value = df['Tilt PMT'].item(),
         format = '${value:,.0f}',
         colors = [(0, 'red'), (500_000, 'green')]
     )
 
-    _b = pn.indicators.Number(
+    _rawpmt = pn.indicators.Number(
         name = 'Raw PMT',
         value = df['Raw PMT'].item(),
         format = '${value:,.0f}',
         colors = [(0, 'white'), (500_000, 'grey')]
     )
-    pn.Row(_a, _b)
+
+    pn.GridBox(_ytd, _projected, _tiltpmt, _rawpmt, ncols=2)
+    return
+
+
+@app.cell(hide_code=True)
+def _(datetime, run_query, today):
+    # Estimate our projected spending for the year based on past expenses
+    # and what we've spent so far this year.
+    _jan_1 = datetime.date(today.year, 1, 1)
+
+    ytd_spend = run_query(f"""
+    select
+        sum(convert(cost(position), 'AUD', date)) as balance
+    where
+        account ~ 'Expenses:'
+        and date >= {_jan_1}
+    """)
+
+
+    def estimate_spending():
+        start_trend = datetime.date(2025, 1, 1)
+        days_since = today - start_trend
+        day_of_year = today.timetuple().tm_yday
+
+        # We're trying to get estimate of "required" or
+        # "non-discretionary" spending, which is always going
+        # to be a somewhat fuzzy & arbitrary distinction. We will
+        # remove accounts that are "discretionary" or "one-off"
+        total_spend = run_query(f"""
+        select
+            sum(convert(cost(position), 'AUD', date)) as balance
+        where
+            account ~ 'Expenses:'
+            and not account ~ 'Expenses:Vacation:'
+            and account != 'Expenses:Everyday:Household-Goods'
+            and account != 'Expenses:Everyday:House-Renovation'
+            and date >= {start_trend.isoformat()}
+        """)
+
+        daily_spend = total_spend / days_since.days
+        days_left = 365 - day_of_year
+        remainder = daily_spend * days_left
+        estimate = ytd_spend + remainder
+
+        return estimate
+    projected = estimate_spending()
+    return projected, ytd_spend
+
+
+@app.cell(hide_code=True)
+def _(run_query):
+    # Addition income that we are free to spend above and beyond what the portfolio
+    # allows.
+    income = run_query(f"""
+    select
+        abs(sum(convert(cost(position), 'AUD', date))) as Income
+    where
+        (account = 'Income:Salary' or account = 'Income:Rent' or account = 'Income:Interest:SecuritiesLending')
+        and year = year(today())
+    """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Dividend Estimates
+    """)
     return
 
 
 @app.cell
 def _(run_query):
-    balances = run_query(f"""
-    select date, amount from #balances
+    _balances = run_query(f"""
+    select date, balance from #postings
     where account in
                 (select account from #accounts where open.meta['include_in_dash'] = 'true')
-    and currency(amount) != 'AUD' and currency(amount) != 'USD'
     order by date
-    """)
+    """).fill_null(0)
 
-    dividends = run_query(f"""
-    select account,date,weight
+    _dividends = run_query(f"""
+    select account,date,abs(position) as amount
     from #postings
     where account ~ 'Income:Dividends'
     order by date
     """)
 
-    dividends.join_asof(balances, on='date', strategy='backward')
+    dividends = _dividends.join_asof(_balances, on='date', strategy='backward')
+
+    recent = dividends.sort('date').group_by('account').tail(8)
+
+    veu = recent.filter(recent['account'] == 'Income:Dividends:VEU')
+    veu_amt = float(veu['balance (VEU_AX)'].last())
+    veu_amt * (veu['amount (AUD)'] / veu['balance (VEU_AX)']).mean()
     return
+
+
+@app.cell(hide_code=True)
+def _(datetime):
+    today = datetime.date.today()
+    return (today,)
 
 
 @app.cell(hide_code=True)
