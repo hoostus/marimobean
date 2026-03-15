@@ -4,8 +4,11 @@ __generated_with = "0.20.4"
 app = marimo.App(width="medium")
 
 
-@app.cell(hide_code=True)
+@app.cell(disabled=True, hide_code=True)
 def _(df, pn, today, ytd_spend):
+    # For some reason running this code means the panel.Grid below doesn't get displayed
+    # in app mode(?!)
+
     _doy = round(today.timetuple().tm_yday / 365 * 100)
     _spend = round((ytd_spend / df['Tilt PMT'] * 100).item())
     pn.panel(f"""# {today}
