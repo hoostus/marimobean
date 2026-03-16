@@ -9,6 +9,7 @@
 #     "polars>=1.39.0",
 #     "python-dateutil>=2.9.0.post0",
 #     "requests>=2.32.0",
+#     "traitlets>=5.14.3",
 # ]
 # ///
 
