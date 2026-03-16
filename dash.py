@@ -160,24 +160,26 @@ def _(datetime, run_query, today):
     return projected, ytd_spend
 
 
-@app.cell(disabled=True)
+@app.cell
 def _(mo):
-    mo.md("""
-    # Dividend Estimates
+    msg = mo.md("""
+        # Dividend Estimates
 
-    Trying to reconstruct historical dividend yields from beancount is complicated and error-prone. Some of the issues:
+        Trying to reconstruct historical dividend yields from beancount is complicated and error-prone. Some of the issues:
 
-    1. Simply linking up the dividend with the security is not explicit in beancount. Even if you have an account *Income:Dividends:VTI* for each fund you are still relying on the heuristic of the account name being the same as the security name. What if they aren't the same?
-    2. Even if you can associate a dividend and security, getting the balance of that security via BQL is not easy. I don't think there's a simple way to do it in one query, so you're probably left iterating over things and calling BQL multiple times. As some point one beings to wonder if simply dropping into Python would be easier.
-    3. But even if you solve that, it is still error-prone because you almost certainly didn't capture the ex-div date in Beancount (as an Account-Receivable?) and only captured the actual payment date. How many shares did you own on the ex-div date...when you don't know when that was? What if you sell shares between the ex-div and payment date? What if there is a lengthy period between the ex-div date and the payment? This is the case with VEU on the ASX (Australia) which has a 1-month lag. This lag also complicates things because conceptually you want to measure things based on the ex-div (which you didn't capture in Beancount!). For instance, the payment in January is actually the Q4 dividend, no some kind of Q1 dividend. So you'd need special case code to handle all of that anyway?
+        1. Simply linking up the dividend with the security is not explicit in beancount. Even if you have an account *Income:Dividends:VTI* for each fund you are still relying on the heuristic of the account name being the same as the security name. What if they aren't the same?
+        2. Even if you can associate a dividend and security, getting the balance of that security via BQL is not easy. I don't think there's a simple way to do it in one query, so you're probably left iterating over things and calling BQL multiple times. As some point one beings to wonder if simply dropping into Python would be easier.
+        3. But even if you solve that, it is still error-prone because you almost certainly didn't capture the ex-div date in Beancount (as an Account-Receivable?) and only captured the actual payment date. How many shares did you own on the ex-div date...when you don't know when that was? What if you sell shares between the ex-div and payment date? What if there is a lengthy period between the ex-div date and the payment? This is the case with VEU on the ASX (Australia) which has a 1-month lag. This lag also complicates things because conceptually you want to measure things based on the ex-div (which you didn't capture in Beancount!). For instance, the payment in January is actually the Q4 dividend, no some kind of Q1 dividend. So you'd need special case code to handle all of that anyway?
 
 
-    So...just store it explicity in a beancount event:
+        So...just store it explicity in a beancount event:
 
-    ```
-    2025-12-31 event "dividend" "MFDX: 0.33"
-    ```
+        ```
+        2025-12-31 event "dividend" "MFDX: 0.33"
+        ```
     """)
+
+    None
     return
 
 
