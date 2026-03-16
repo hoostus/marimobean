@@ -5,9 +5,9 @@ app = marimo.App(width="medium")
 
 
 @app.cell(hide_code=True)
-def _(df, mo, today, ytd_spend):
+def _(mo, pmt_df, today, ytd_spend):
     _doy = round(today.timetuple().tm_yday / 365 * 100)
-    _spend = round((ytd_spend / df['Tilt PMT'] * 100).item())
+    _spend = round((ytd_spend / pmt_df['Tilt PMT'] * 100).item())
 
     if _doy >= _spend:
         _style = 'green'
@@ -21,7 +21,7 @@ def _(df, mo, today, ytd_spend):
 
 
 @app.cell(hide_code=True)
-def _(df, pl, pn, projected, ytd_spend):
+def _(pl, pmt_df, pn, projected, ytd_spend):
     _ytd = pn.indicators.Number(
         name = 'YTD Spend',
         value = ytd_spend.item(),
@@ -41,14 +41,14 @@ def _(df, pl, pn, projected, ytd_spend):
 
     _tiltpmt = pn.indicators.Number(
         name = 'Tilt PMT',
-        value = df['Tilt PMT'].item(),
+        value = pmt_df['Tilt PMT'].item(),
         format = '${value:,.0f}',
         colors = [(0, 'red'), (500_000, 'green')]
     )
 
     _rawpmt = pn.indicators.Number(
         name = 'Raw PMT',
-        value = df['Raw PMT'].item(),
+        value = pmt_df['Raw PMT'].item(),
         format = '${value:,.0f}',
         colors = [(0, 'white'), (500_000, 'grey')]
     )
@@ -116,39 +116,109 @@ def _(run_query):
     return
 
 
-@app.cell(hide_code=True)
+@app.cell(disabled=True, hide_code=True)
 def _(mo):
-    mo.md(r"""
-    # Dividend Estimates
+    _df = mo.sql(
+        f"""
+        mo.md(r\"""
+        # Dividend Estimates
 
-    Trying to reconstruct historical dividend yields from beancount is complicated and error-prone. Some of the issues:
+        Trying to reconstruct historical dividend yields from beancount is complicated and error-prone. Some of the issues:
 
-    1. Simply linking up the dividend with the security is not explicit in beancount. Even if you have an account *Income:Dividends:VTI* for each fund you are still relying on the heuristic of the account name being the same as the security name. What if they aren't the same?
-    2. Even if you can associate a dividend and security, getting the balance of that security via BQL is not easy. I don't think there's a simple way to do it in one query, so you're probably left iterating over things and calling BQL multiple times. As some point one beings to wonder if simply dropping into Python would be easier.
-    3. But even if you solve that, it is still error-prone because you almost certainly didn't capture the ex-div date in Beancount (as an Account-Receivable?) and only captured the actual payment date. How many shares did you own on the ex-div date...when you don't know when that was? What if you sell shares between the ex-div and payment date? What if there is a lengthy period between the ex-div date and the payment? This is the case with VEU on the ASX (Australia) which has a 1-month lag. This lag also complicates things because conceptually you want to measure things based on the ex-div (which you didn't capture in Beancount!). For instance, the payment in January is actually the Q4 dividend, no some kind of Q1 dividend. So you'd need special case code to handle all of that anyway?
+        1. Simply linking up the dividend with the security is not explicit in beancount. Even if you have an account *Income:Dividends:VTI* for each fund you are still relying on the heuristic of the account name being the same as the security name. What if they aren't the same?
+        2. Even if you can associate a dividend and security, getting the balance of that security via BQL is not easy. I don't think there's a simple way to do it in one query, so you're probably left iterating over things and calling BQL multiple times. As some point one beings to wonder if simply dropping into Python would be easier.
+        3. But even if you solve that, it is still error-prone because you almost certainly didn't capture the ex-div date in Beancount (as an Account-Receivable?) and only captured the actual payment date. How many shares did you own on the ex-div date...when you don't know when that was? What if you sell shares between the ex-div and payment date? What if there is a lengthy period between the ex-div date and the payment? This is the case with VEU on the ASX (Australia) which has a 1-month lag. This lag also complicates things because conceptually you want to measure things based on the ex-div (which you didn't capture in Beancount!). For instance, the payment in January is actually the Q4 dividend, no some kind of Q1 dividend. So you'd need special case code to handle all of that anyway?
 
 
-    So...just store it explicity in a beancount event:
+        So...just store it explicity in a beancount event:
 
-    ```
-    2025-12-31 event "dividend" "MFDX: 0.33"
-    ```
+        ```
+        2025-12-31 event "dividend" "MFDX: 0.33"
+        ```
+        \""")
+        """
+    )
+    return
+
+
+@app.cell(disabled=True, hide_code=True)
+def _(run_query):
+    # This shows all holdings.
+
+    run_query(f"""
+    SELECT account,
+        units(sum(position)) as units,
+        cost_number as cost,
+        first(getprice(currency, cost_currency)) as price,
+        cost(sum(position)) as book_value,
+        value(sum(position)) as market_value,
+        cost_date as acquisition_date
+      WHERE account_sortkey(account) ~ "^[01]"
+      GROUP BY account, cost_date, currency, cost_currency, cost_number, account_sortkey(account)
+      ORDER BY account_sortkey(account), currency, cost_date
     """)
     return
 
 
-@app.cell
-def _(pl, run_query):
+@app.cell(hide_code=True)
+def _(run_query):
     _df = run_query(f"""
-    select * from #events where type = 'dividend'
+    SELECT
+        units(sum(position)) as units
+    WHERE
+        account in (select account from #accounts where open.meta['include_in_dash'] = 'true')
+    """)
+
+    # the column names are 'units (VTI)' and we just want 'VTI'
+    _df = _df.rename(lambda c: c.replace('units (', '')).rename(lambda c: c.replace(')', ''))
+
+    # Want the name to match what we capture in the events table.
+    # Note that VEU's dividends are tracked in USD.
+    holdings = _df.rename({'VEU_AX': 'VEU'})
+    return (holdings,)
+
+
+@app.cell(hide_code=True)
+def _(holdings, math, mo, pl, run_query, today):
+    _df = run_query(f"""
+    select date,description from #events where type = 'dividend'
     """)
     _df = _df.with_columns(pl.col("description").str.split_exact(':', 1))
     _df = _df.with_columns(pl.col("description").struct.rename_fields(['etf', 'dividend'])).unnest('description')
     _df = _df.with_columns(pl.col('dividend').str.strip_chars())
     _df = _df.with_columns(pl.col('dividend').cast(pl.Decimal(10, 6)))
+    _df = _df.with_columns(pl.col('date').dt.quarter().alias('q'))
+
+    # we may need to massage some of the Quarters.
+    # If their ex-div date is very close to the end of a quarter (e.g. December 30)
+    # then the actual pay date recorded in beancount may be in the following quarter (e.g. January 3)
+    # So for anything date whose Month is 1, 4, 7, 10 we use the previous quarter.
+    # That is: January payments become Q4 dividends, April payments become Q2 dividends, and so on.
+    _df = _df.with_columns(pl.when(pl.col('date').dt.month().is_in([1, 4, 7, 10]))
+                    .then(pl.col('q') - 1)
+                    .otherwise(pl.col('q')))
+
+    # only use the most recent 2 years (8 quarters)
     _df = _df.sort('date', descending=True).group_by('etf').tail(8)
 
-    _df['date'].dt.quarter()
+    # This gets the average dividend for each quarter for each ETF
+    _df = _df.group_by('etf', 'q').mean()
+
+    # we need to transpose it so we can join to it
+    _hold = holdings.transpose(include_header=True, column_names=['holding']).rename({'column': 'etf'})
+
+    _df = _df.join(_hold, on='etf')
+    _df = _df.with_columns(pl.col('dividend').mul(pl.col('holding')).alias('div_amt'))
+
+    estimated_dividends = _df.group_by('q').agg(pl.col('div_amt').sum())
+
+    todays_quarter = math.floor((today.month - 1) / 3) + 1
+    _div_next_q = estimated_dividends.filter(pl.col('q') == todays_quarter)['div_amt'].item()
+    _div_annual = estimated_dividends.sum()['div_amt'].item()
+
+    mo.hstack([mo.md('# Estimated Dividends'),
+              mo.md(f"Next Q{todays_quarter}: ${_div_next_q:,.0f}").style(),
+              mo.md(f"Year: ${_div_annual:,.0f}").style()])
     return
 
 
@@ -160,10 +230,10 @@ def _(datetime):
 
 @app.cell(hide_code=True)
 def _(pl, pmt_raw_aud, pmt_tilt_aud):
-    df = pl.DataFrame(data={'Tilt PMT': pmt_tilt_aud, 'Raw PMT': pmt_raw_aud})
-    df = df.with_columns(pl.all()) / 1000
-    df = df.with_columns(pl.all().floor()) * 1000
-    return (df,)
+    _df = pl.DataFrame(data={'Tilt PMT': pmt_tilt_aud, 'Raw PMT': pmt_raw_aud})
+    _df = _df.with_columns(pl.all()) / 1000
+    pmt_df = _df.with_columns(pl.all().floor()) * 1000
+    return (pmt_df,)
 
 
 @app.cell(hide_code=True)
@@ -283,6 +353,7 @@ def _():
 
     import datetime
     from pathlib import Path
+    import math
 
     from numpy_financial import pmt, pv
     from decimal import Decimal
@@ -293,6 +364,7 @@ def _():
         datetime,
         home_dir,
         load_file,
+        math,
         mo,
         pl,
         pmt,
@@ -309,7 +381,7 @@ def _(mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(home_dir):
     beancount_file = f'{home_dir}/Documents/beancount/my.bean'
     #beancount_file = 'huge-example.beancount'
