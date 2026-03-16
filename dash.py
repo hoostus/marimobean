@@ -4,7 +4,13 @@ __generated_with = "0.20.4"
 app = marimo.App(width="medium")
 
 
-@app.cell(hide_code=True)
+@app.cell
+def _(datetime):
+    today = datetime.date.today()
+    return (today,)
+
+
+@app.cell
 def _(mo, pmt_df, today, ytd_spend):
     _doy = round(today.timetuple().tm_yday / 365 * 100)
     _spend = round((ytd_spend / pmt_df['Tilt PMT'] * 100).item())
@@ -20,7 +26,60 @@ def _(mo, pmt_df, today, ytd_spend):
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
+def _(get_price, run_query):
+    def get_nw(date):
+        df = run_query(f"""
+            select convert(sum(position), 'USD', {date}) as amount
+            where account in
+                (select account from #accounts where open.meta['include_in_dash'] = 'true')
+        """)
+        usd = df['amount (USD)'].item()
+        # beancount can't convert FSS_INTL to USD (only to AUD) because it doesn't do transitive conversions...
+        fss = df['amount (FSS_INTL)'].item()
+        fss_aud = fss * get_price('FSS_INTL')['amount (AUD)'].item()
+        fss_usd = fss_aud * get_price('AUD')['amount (USD)'].item()
+        return usd + fss_usd
+
+    return (get_nw,)
+
+
+@app.cell
+def _(Decimal, aud_usd, get_nw, pl, pmt, pv, today):
+    def calculate_pmt(date):
+    # How to make these more visible and if-possible self-updating?
+        networth = get_nw(date)
+
+        expected_returns = Decimal('0.031')
+        life_expectancy = Decimal('72.335')
+        bequest = Decimal(0)
+        pmt_raw = -pmt(expected_returns, life_expectancy, networth, bequest, 1)
+        pmt_raw_aud = pmt_raw / aud_usd
+
+        target_portfolio = Decimal(5_000_000)
+        portfolio_tilt = Decimal('0.5')
+        pmt_portfolio_tilt = pmt_raw * pow(networth / target_portfolio, portfolio_tilt)
+
+        target_income_aud = 225_000
+        target_income_usd = target_income_aud * aud_usd
+        target_income_portfolio = pv(expected_returns, life_expectancy, -target_income_usd, 0)
+        income_tilt = Decimal('-0.5')
+        pmt_income_tilt = pmt_raw * pow(networth / target_income_portfolio, income_tilt)
+
+        pmt_tilt = min(pmt_portfolio_tilt, pmt_income_tilt)
+
+        pmt_tilt_aud = pmt_tilt / aud_usd
+
+        _df = pl.DataFrame(data={'Tilt PMT': pmt_tilt_aud, 'Raw PMT': pmt_raw_aud})
+        _df = _df.with_columns(pl.all()) / 1000
+        pmt_df = _df.with_columns(pl.all().floor()) * 1000
+
+        return pmt_df
+    pmt_df = calculate_pmt(today.isoformat())
+    return (pmt_df,)
+
+
+@app.cell
 def _(pl, pmt_df, pn, projected, ytd_spend):
     _ytd = pn.indicators.Number(
         name = 'YTD Spend',
@@ -57,7 +116,7 @@ def _(pl, pmt_df, pn, projected, ytd_spend):
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(datetime, run_query, today):
     # Estimate our projected spending for the year based on past expenses
     # and what we've spent so far this year.
@@ -70,7 +129,6 @@ def _(datetime, run_query, today):
         account ~ 'Expenses:'
         and date >= {_jan_1}
     """)
-
 
     def estimate_spending():
         start_trend = datetime.date(2025, 1, 1)
@@ -102,46 +160,28 @@ def _(datetime, run_query, today):
     return projected, ytd_spend
 
 
-@app.cell(hide_code=True)
-def _(run_query):
-    # Addition income that we are free to spend above and beyond what the portfolio
-    # allows.
-    income = run_query(f"""
-    select
-        abs(sum(convert(cost(position), 'AUD', date))) as Income
-    where
-        (account = 'Income:Salary' or account = 'Income:Rent' or account = 'Income:Interest:SecuritiesLending')
-        and year = year(today())
+@app.cell(disabled=True)
+def _(mo):
+    mo.md("""
+    # Dividend Estimates
+
+    Trying to reconstruct historical dividend yields from beancount is complicated and error-prone. Some of the issues:
+
+    1. Simply linking up the dividend with the security is not explicit in beancount. Even if you have an account *Income:Dividends:VTI* for each fund you are still relying on the heuristic of the account name being the same as the security name. What if they aren't the same?
+    2. Even if you can associate a dividend and security, getting the balance of that security via BQL is not easy. I don't think there's a simple way to do it in one query, so you're probably left iterating over things and calling BQL multiple times. As some point one beings to wonder if simply dropping into Python would be easier.
+    3. But even if you solve that, it is still error-prone because you almost certainly didn't capture the ex-div date in Beancount (as an Account-Receivable?) and only captured the actual payment date. How many shares did you own on the ex-div date...when you don't know when that was? What if you sell shares between the ex-div and payment date? What if there is a lengthy period between the ex-div date and the payment? This is the case with VEU on the ASX (Australia) which has a 1-month lag. This lag also complicates things because conceptually you want to measure things based on the ex-div (which you didn't capture in Beancount!). For instance, the payment in January is actually the Q4 dividend, no some kind of Q1 dividend. So you'd need special case code to handle all of that anyway?
+
+
+    So...just store it explicity in a beancount event:
+
+    ```
+    2025-12-31 event "dividend" "MFDX: 0.33"
+    ```
     """)
     return
 
 
-@app.cell(disabled=True, hide_code=True)
-def _(mo):
-    _df = mo.sql(
-        f"""
-        mo.md(r\"""
-        # Dividend Estimates
-
-        Trying to reconstruct historical dividend yields from beancount is complicated and error-prone. Some of the issues:
-
-        1. Simply linking up the dividend with the security is not explicit in beancount. Even if you have an account *Income:Dividends:VTI* for each fund you are still relying on the heuristic of the account name being the same as the security name. What if they aren't the same?
-        2. Even if you can associate a dividend and security, getting the balance of that security via BQL is not easy. I don't think there's a simple way to do it in one query, so you're probably left iterating over things and calling BQL multiple times. As some point one beings to wonder if simply dropping into Python would be easier.
-        3. But even if you solve that, it is still error-prone because you almost certainly didn't capture the ex-div date in Beancount (as an Account-Receivable?) and only captured the actual payment date. How many shares did you own on the ex-div date...when you don't know when that was? What if you sell shares between the ex-div and payment date? What if there is a lengthy period between the ex-div date and the payment? This is the case with VEU on the ASX (Australia) which has a 1-month lag. This lag also complicates things because conceptually you want to measure things based on the ex-div (which you didn't capture in Beancount!). For instance, the payment in January is actually the Q4 dividend, no some kind of Q1 dividend. So you'd need special case code to handle all of that anyway?
-
-
-        So...just store it explicity in a beancount event:
-
-        ```
-        2025-12-31 event "dividend" "MFDX: 0.33"
-        ```
-        \""")
-        """
-    )
-    return
-
-
-@app.cell(disabled=True, hide_code=True)
+@app.cell(disabled=True)
 def _(run_query):
     # This shows all holdings.
 
@@ -160,7 +200,7 @@ def _(run_query):
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(run_query):
     _df = run_query(f"""
     SELECT
@@ -178,7 +218,7 @@ def _(run_query):
     return (holdings,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(holdings, math, mo, pl, run_query, today):
     _df = run_query(f"""
     select date,description from #events where type = 'dividend'
@@ -222,18 +262,18 @@ def _(holdings, math, mo, pl, run_query, today):
     return
 
 
-@app.cell(hide_code=True)
-def _(datetime):
-    today = datetime.date.today()
-    return (today,)
-
-
-@app.cell(hide_code=True)
-def _(pl, pmt_raw_aud, pmt_tilt_aud):
-    _df = pl.DataFrame(data={'Tilt PMT': pmt_tilt_aud, 'Raw PMT': pmt_raw_aud})
-    _df = _df.with_columns(pl.all()) / 1000
-    pmt_df = _df.with_columns(pl.all().floor()) * 1000
-    return (pmt_df,)
+@app.cell
+def _(run_query):
+    # Addition income that we are free to spend above and beyond what the portfolio
+    # allows.
+    income = run_query(f"""
+    select
+        abs(sum(convert(cost(position), 'AUD', date))) as Income
+    where
+        (account = 'Income:Salary' or account = 'Income:Rent' or account = 'Income:Interest:SecuritiesLending')
+        and year = year(today())
+    """)
+    return
 
 
 @app.cell(hide_code=True)
@@ -249,25 +289,7 @@ def _(mo):
     return
 
 
-@app.cell(hide_code=True)
-def _(get_price, run_query):
-    def get_nw():
-        df = run_query(f"""
-            select convert(sum(position), 'USD', today()) as amount
-            where account in
-                (select account from #accounts where open.meta['include_in_dash'] = 'true')
-        """)
-        usd = df['amount (USD)'].item()
-        # beancount can't convert FSS_INTL to USD (only to AUD) because it doesn't do transitive conversions...
-        fss = df['amount (FSS_INTL)'].item()
-        fss_aud = fss * get_price('FSS_INTL')['amount (AUD)'].item()
-        fss_usd = fss_aud * get_price('AUD')['amount (USD)'].item()
-        return usd + fss_usd
-    networth = get_nw()
-    return (networth,)
-
-
-@app.cell(hide_code=True)
+@app.cell
 def _(datetime, mo, run_query):
     _df = run_query(f"""
         select * from #prices;
@@ -286,39 +308,14 @@ def _(datetime, mo, run_query):
     return aud_usd, get_price
 
 
-@app.function(hide_code=True)
+@app.function
 def display(d):
     """ We get rid of needless precision, which makes it hardesr to parse things,
     and only display things to the nearest thousand. """
     return int(round(d, -3))
 
 
-@app.cell(hide_code=True)
-def _(Decimal, aud_usd, networth, pmt, pv):
-    # How to make these more visible and if-possible self-updating?
-    expected_returns = Decimal('0.031')
-    life_expectancy = Decimal('72.335')
-    bequest = Decimal(0)
-    pmt_raw = -pmt(expected_returns, life_expectancy, networth, bequest, 1)
-    pmt_raw_aud = pmt_raw / aud_usd
-
-    target_portfolio = Decimal(5_000_000)
-    portfolio_tilt = Decimal('0.5')
-    pmt_portfolio_tilt = pmt_raw * pow(networth / target_portfolio, portfolio_tilt)
-
-    target_income_aud = 225_000
-    target_income_usd = target_income_aud * aud_usd
-    target_income_portfolio = pv(expected_returns, life_expectancy, -target_income_usd, 0)
-    income_tilt = Decimal('-0.5')
-    pmt_income_tilt = pmt_raw * pow(networth / target_income_portfolio, income_tilt)
-
-    pmt_tilt = min(pmt_portfolio_tilt, pmt_income_tilt)
-
-    pmt_tilt_aud = pmt_tilt / aud_usd
-    return pmt_raw_aud, pmt_tilt_aud
-
-
-@app.cell(hide_code=True)
+@app.cell
 def _(entries, options, pl, run_bql_query):
     def run_query(query):
         """ Convert a beancount BQL query result to a polars dataframe """
@@ -330,14 +327,14 @@ def _(entries, options, pl, run_bql_query):
     return (run_query,)
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(beancount_file, load_file, printer):
     entries, _errors, options = load_file(beancount_file)
     printer.print_errors(_errors)
     return entries, options
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _():
     import marimo as mo
     import altair as alt
@@ -375,13 +372,13 @@ def _():
     )
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(mo):
     mo.md(r"""/// Attention | Edit this to point to your beancount file if you want to try on real data.""") if mo.app_meta().mode == 'edit' else None
     return
 
 
-@app.cell(hide_code=True)
+@app.cell
 def _(home_dir):
     beancount_file = f'{home_dir}/Documents/beancount/my.bean'
     #beancount_file = 'huge-example.beancount'
