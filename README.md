@@ -1,5 +1,18 @@
 # Quickstart
 
+## Experimenting without local installation
+
+Click [this link](https://molab.marimo.io/github.com/hoostus/marimobean/blob/main/pnl.py).
+
+**Result:** the notebook will be open in the [molab](https://molab.marimo.io/notebooks) site.
+
+Click the **Run in molab** button  in the top right corner.
+
+Click on the right bottom corner the **Run** button (a triangle, pointing to the right)
+
+
+## Running notebooks locally
+
 1. Install uv, if not already installed.
 ```
 curl -LsSf https://astral.sh/uv/install.sh | sh

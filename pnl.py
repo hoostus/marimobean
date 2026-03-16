@@ -1,3 +1,17 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "altair>=6.0.0",
+#     "beancount>=3.2.0",
+#     "beanquery>=0.2.0",
+#     "great-tables>=0.21.0",
+#     "marimo>=0.20.4",
+#     "polars>=1.39.0",
+#     "python-dateutil>=2.9.0.post0",
+#     "requests>=2.32.0",
+# ]
+# ///
+
 import marimo
 
 __generated_with = "0.20.4"
@@ -171,8 +185,49 @@ def _(entries, options, pl, run_bql_query):
 
 
 @app.cell(hide_code=True)
-def _(beancount_file, load_file, printer):
-    entries, _errors, options = load_file(beancount_file)
+def _(Path, beancount_file, load_file, load_string, printer):
+    # loading the beancount file 
+
+    REPO = "hoostus/marimobean"
+    BRANCH = "main"
+
+    def check_if_runs_in_molab() -> bool:
+        """
+        Heuristic to determine if we're running in the molab environment. 
+        We want to do this because in the molab environment, the beancount file is not available, 
+        and we will need to download it from github.
+        """
+
+        EXPECTED_IN_MOLAB_NAMES: set[str] = {
+            "__marimo__",
+            "lock.txt",
+            "notebook.py",
+            "pyproject.toml",
+        } 
+
+        cwd = Path.cwd()
+        # List the names of the files and folders in the current directory
+        found_names: set[str] = {p.name for p in cwd.iterdir()}
+
+        return EXPECTED_IN_MOLAB_NAMES.issubset(found_names)
+
+
+    def fetch_github_text(path_in_repo, repo=REPO, branch=BRANCH) -> str:
+        """ Fetches the text content of a file in a github repo. """
+        url = f"https://raw.githubusercontent.com/{repo}/{branch}/{path_in_repo}"
+        r = requests.get(url)
+        r.raise_for_status()
+        return r.text
+
+    check_if_runs_in_molab: bool = check_if_runs_in_molab()
+
+    if check_if_runs_in_molab:
+        import requests
+        beancount_file_string = fetch_github_text(beancount_file)
+        entries, _errors, options = load_string(beancount_file_string)
+    else:
+        entries, _errors, options = load_file(beancount_file)
+
     printer.print_errors(_errors)
     return entries, options
 
@@ -183,7 +238,7 @@ def _():
     import altair as alt
     import polars as pl
 
-    from beancount.loader import load_file
+    from beancount.loader import load_file, load_string
     from beancount.parser import printer
     from beanquery.query import run_query as run_bql_query
 
@@ -192,7 +247,18 @@ def _():
     from pathlib import Path
 
     home_dir = Path.home()
-    return alt, datetime, dateutil, load_file, mo, pl, printer, run_bql_query
+    return (
+        Path,
+        alt,
+        datetime,
+        dateutil,
+        load_file,
+        load_string,
+        mo,
+        pl,
+        printer,
+        run_bql_query,
+    )
 
 
 if __name__ == "__main__":
