@@ -62,7 +62,6 @@ def _(datetime, year_slider):
 
     #end_date = datetime.date.today()
     end_date = datetime.date(year_slider.value[1], 12, 31)
-
     return end_date, start_date
 
 
@@ -85,16 +84,16 @@ def _(
 
     def get_nws(start_date, end_date, account_re):
         summer = summator.BeanSummator(entries, options, account_re)
-    
+
         price_map = beancount.core.prices.build_price_map(entries)
-    
+
         nws = {'date': [], 'net_worth': []}
-    
+
         for d in daterange(start_date, end_date):
             sum = summer.sum_till_date(d)
             nws['date'].append(d.isoformat())
             nws['net_worth'].append(sum.convert(CURRENCY, price_map, d).sum_all().get_currency_units(CURRENCY).number)
-    
+
         return nws
     nws = get_nws(start_date, end_date, account_re)
     return (nws,)
@@ -102,7 +101,7 @@ def _(
 
 @app.cell
 def _(nws, pl):
-    networth = pl.DataFrame(nws, schema={'date': pl.Date, 'net_worth': pl.Decimal})
+    networth = pl.DataFrame(nws, schema={'date': pl.Date, 'net_worth': pl.Decimal(scale=2)})
     networth
     return (networth,)
 
