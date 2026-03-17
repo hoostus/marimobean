@@ -11,7 +11,7 @@ def _(mo):
 
     This uses ev2geny's Summator to calculate net worth faster.
 
-    It still is slow! Because reducing a beancount inventory against a beancount pricemap for each day of the year, over multiple years, takes time. On my computer is seems to take approximately 1ms for each day. So 1,000 days (~2.7 years) is 1 second.
+    It still is slow! Because reducing a beancount inventory against a beancount pricemap for each day of the year, over multiple years, takes time. On my computer is seems to take approximately 1ms for each day using the huge-example.beancount. So 1,000 days (~2.7 years) is 1 second and the full beancount file (2008-2015) takes 7.8 seconds.
     """)
     return
 
