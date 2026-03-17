@@ -172,43 +172,69 @@ def _(alt, income_tilt, mo, port_tilt, raw):
 def _(mo):
     mo.md(r"""
     # Income
+
+    Income from these three specific categories are a "bonus" above and beyond what the portfolio can generate. Conceptually they can be subtracted from spending to show how much room we still have left towards our portfolio PMT spending limit.
     """)
     return
 
 
 @app.cell
-def _(pl, run_query, start_date):
-    run_query(f"""
+def _(datetime, pl, run_query):
+    income_ytd = run_query(f"""
     select
         date,
         sum(convert(cost(position), 'AUD', date)) as amount
     where
-        account ~ 'Income:'
-        and date > {start_date.isoformat()}
+        year = {datetime.date.today().year}
+        and (account = 'Income:Salary' or account = 'Income:Rent' or account = 'Income:Interest:SecuritiesLending')
     group by date
-    """).with_columns(pl.col('amount (AUD)').abs())
-    return
+    """).with_columns(pl.col('amount (AUD)').abs(), pl.col('amount (AUD)').abs().cum_sum().alias('income'))
+
+    income_ytd
+    return (income_ytd,)
 
 
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
     # Spending
+
+    This is just a simple tracking of our expenses.
     """)
     return
 
 
 @app.cell
-def _(run_query, start_date):
-    run_query(f"""
+def _(datetime, pl, run_query):
+    spending_ytd = run_query(f"""
     select
         date,
         sum(convert(cost(position), 'AUD', date)) as amount
     where
         account ~ 'Expenses:'
-        and date > {start_date.isoformat()}
+        and year = {datetime.date.today().year}
     group by date
-    """)
+    """).with_columns(pl.col('amount (AUD)').cum_sum().alias('spending'))
+
+    spending_ytd
+    return (spending_ytd,)
+
+
+@app.cell
+def _(income_tilt, income_ytd, port_tilt, raw, spending_ytd):
+    raw
+    port_tilt
+    income_tilt
+
+    trend = raw.select(['date', 'target'])
+
+    trend = trend.join(port_tilt.select(['date', 'target']), on='date', suffix='_portfolio_tilt')
+    trend = trend.join(income_tilt.select(['date', 'target']), on='date', suffix='_spending_tilt')
+
+    trend = trend.join(income_ytd.select(['date', 'income']), on='date')
+    trend = trend.join(spending_ytd.select(['date', 'spending']), on='date')
+
+    trend
     return
 
 
