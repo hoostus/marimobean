@@ -107,8 +107,8 @@ def _(get_days_in_year, networth, pl):
 
 @app.cell
 def _(calculate_spend, networth, pl, pv):
-    def tilt_portfolio(df, target_nw, tilt_amt):
-        df = df.with_columns(target_frac = pl.col('net_worth') / target_nw)
+    def tilt_portfolio(df, tilt_amt):
+        df = df.with_columns(target_frac = pl.col('net_worth') / pl.col('target'))
         df = df.with_columns(tilt_factor = pl.col('target_frac').pow(tilt_amt))
         df = df.with_columns(pmt = pl.col('pmt') * pl.col('tilt_factor'))
         df = df.with_columns(pl.col('pmt').cast(pl.Decimal(scale=2)))
@@ -116,25 +116,82 @@ def _(calculate_spend, networth, pl, pv):
         return df
 
     def tilt_portfolio_target(df):
-        target = 7_000_000
         tilt = 0.5
-        return tilt_portfolio(df, target, tilt)
+        target = 7_000_000
+        return tilt_portfolio(df.with_columns(target = pl.lit(target)), tilt)
 
     def tilt_spend_target(pmt):
         target_income = 225_000
         tilt = -0.5
         target = pv(pmt['rate'], pmt['nper'], -target_income, 0)
-        pmt = pmt.with_columns(target = target)
+        return tilt_portfolio(pmt.with_columns(target = target), tilt)
 
-        return pmt
 
-    raw = calculate_spend(networth).select(['date', 'pmt'])
-    port_tilt = calculate_spend(tilt_portfolio_target(networth)).select(['date', 'pmt'])
-    income_tilt = calculate_spend(tilt_spend_target(networth)).select(['date', 'pmt'])
+    raw = calculate_spend(networth)
+    port_tilt = calculate_spend(tilt_portfolio_target(networth))
+    income_tilt = calculate_spend(tilt_spend_target(networth))
 
-    raw.join(
-        port_tilt, on='date', suffix='_portfolio_tilt').join(
-        income_tilt, on='date', suffix='_income_tilt')
+    tilt_spend_target(networth)
+    return income_tilt, port_tilt, raw
+
+
+@app.cell
+def _(alt, income_tilt, mo, port_tilt, raw):
+    _j = raw.select(['date', 'pmt']).join(
+        port_tilt.select(['date', 'pmt']), on='date', suffix='_portfolio_tilt').join(
+        income_tilt.select(['date', 'pmt']), on='date', suffix='_income_tilt')
+
+    mo.ui.altair_chart(alt.Chart(_j.unpivot(index='date')).mark_line(point=True).encode(
+        x='date',
+        y='value',
+        color='variable'
+    ))
+
+    _j
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Income
+    """)
+    return
+
+
+@app.cell
+def _(pl, run_query, start_date):
+    run_query(f"""
+    select
+        date,
+        sum(convert(cost(position), 'AUD', date)) as amount
+    where
+        account ~ 'Income:'
+        and date > {start_date.isoformat()}
+    group by date
+    """).with_columns(pl.col('amount (AUD)').abs())
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    mo.md(r"""
+    # Spending
+    """)
+    return
+
+
+@app.cell
+def _(run_query, start_date):
+    run_query(f"""
+    select
+        date,
+        sum(convert(cost(position), 'AUD', date)) as amount
+    where
+        account ~ 'Expenses:'
+        and date > {start_date.isoformat()}
+    group by date
+    """)
     return
 
 
@@ -147,7 +204,7 @@ def _(entries, options, pl, run_bql_query):
         df = pl.DataFrame(schema=schema, data=rows, orient='row', infer_schema_length=None)
         return df
 
-    return
+    return (run_query,)
 
 
 @app.cell(hide_code=True)
