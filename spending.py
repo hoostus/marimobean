@@ -1,7 +1,7 @@
 import marimo
 
 __generated_with = "0.20.4"
-app = marimo.App(width="medium")
+app = marimo.App()
 
 
 @app.cell
@@ -64,13 +64,6 @@ def _(
 
 
 @app.cell
-def _(nws, pl):
-    networth = pl.DataFrame(nws, schema={'date': pl.Date, 'net_worth': pl.Decimal(scale=2)})
-    networth
-    return (networth,)
-
-
-@app.cell
 def _(datetime, pl):
     def get_days_in_year():
         current_year = datetime.date.today().year
@@ -83,38 +76,65 @@ def _(datetime, pl):
 
 
 @app.cell
-def _(get_days_in_year, networth, pl):
+def _(nws, pl):
     from numpy_financial import pmt, pv
 
-    _nw = networth
+    _nw = pl.DataFrame(nws, schema={'date': pl.Date, 'net_worth': pl.Decimal(scale=2)})
     _nw = _nw.with_columns(rate = pl.lit(0.031))
     _nw = _nw.with_columns(nper = pl.lit(72.335))
     _nw = _nw.with_columns(fv = pl.lit(0))
     _nw = _nw.with_columns(pl.col('net_worth').cast(float))
+
     pmts = -pmt(_nw['rate'], _nw['nper'], _nw['net_worth'], _nw['fv'])
+
     _nw = _nw.with_columns(pl.Series('pmt', pmts, dtype=pl.Decimal(scale=2)))
     _nw = _nw.with_columns(day_of_year = pl.col('date').dt.ordinal_day())
 
-    tilt_pmt = _nw.clone()
-
-    _nw = _nw.with_columns(daily_spend = pl.col('pmt') / get_days_in_year())
-    _nw = _nw.with_columns(target = pl.col('daily_spend') * pl.col('day_of_year'))
-
-    raw_pmt = _nw
-    _nw
-    return (tilt_pmt,)
+    networth = _nw
+    networth
+    return networth, pv
 
 
 @app.cell
-def _(pl, tilt_pmt):
-    target_portfolio = 7_000_000
-    tilt = 0.5
+def _(get_days_in_year, networth, pl):
+    def calculate_spend(pmt):
+        pmt = pmt.with_columns(daily_spend = pl.col('pmt') / get_days_in_year())
+        pmt = pmt.with_columns(target = pl.col('daily_spend') * pl.col('day_of_year'))
+        return pmt
+    calculate_spend(networth)
+    return (calculate_spend,)
 
-    _pmt = tilt_pmt.with_columns(target_frac = pl.col('net_worth') / target_portfolio)
-    _pmt = _pmt.with_columns(tilt_factor = pl.col('target_frac').pow(tilt))
-    _pmt = _pmt.with_columns(tilt_pmt = pl.col('pmt') * pl.col('tilt_factor'))
-    _pmt = _pmt.with_columns(pl.col('tilt_pmt').cast(pl.Decimal(scale=2)))
-    _pmt
+
+@app.cell
+def _(calculate_spend, networth, pl, pv):
+    def tilt_portfolio(df, target_nw, tilt_amt):
+        df = df.with_columns(target_frac = pl.col('net_worth') / target_nw)
+        df = df.with_columns(tilt_factor = pl.col('target_frac').pow(tilt_amt))
+        df = df.with_columns(pmt = pl.col('pmt') * pl.col('tilt_factor'))
+        df = df.with_columns(pl.col('pmt').cast(pl.Decimal(scale=2)))
+
+        return df
+
+    def tilt_portfolio_target(df):
+        target = 7_000_000
+        tilt = 0.5
+        return tilt_portfolio(df, target, tilt)
+
+    def tilt_spend_target(pmt):
+        target_income = 225_000
+        tilt = -0.5
+        target = pv(pmt['rate'], pmt['nper'], -target_income, 0)
+        pmt = pmt.with_columns(target = target)
+
+        return pmt
+
+    raw = calculate_spend(networth).select(['date', 'pmt'])
+    port_tilt = calculate_spend(tilt_portfolio_target(networth)).select(['date', 'pmt'])
+    income_tilt = calculate_spend(tilt_spend_target(networth)).select(['date', 'pmt'])
+
+    raw.join(
+        port_tilt, on='date', suffix='_portfolio_tilt').join(
+        income_tilt, on='date', suffix='_income_tilt')
     return
 
 
