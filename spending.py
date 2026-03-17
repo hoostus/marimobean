@@ -8,7 +8,7 @@ app = marimo.App()
 def _(alt, end_date, mo, networth, start_date):
     mo.ui.altair_chart(alt.Chart(networth).mark_line(point=True)
         .encode(x=alt.X('date', title='Date'),
-                y=alt.Y('net_worth', title='Net Worth', axis=alt.Axis(format='$,.0f')),
+                y=alt.Y('net_worth', title='Net Worth', axis=alt.Axis(format='$,.0f')).scale(domainMin=5_500_000),
                 tooltip=[alt.Tooltip('date', title='Date'), alt.Tooltip('net_worth', title='Net worth', format='$,.0f')])
         .properties(title=alt.Title('Net Worth', subtitle=f"{start_date} to {end_date}")))
     return
@@ -141,13 +141,30 @@ def _(alt, income_tilt, mo, port_tilt, raw):
         port_tilt.select(['date', 'pmt']), on='date', suffix='_portfolio_tilt').join(
         income_tilt.select(['date', 'pmt']), on='date', suffix='_income_tilt')
 
-    mo.ui.altair_chart(alt.Chart(_j.unpivot(index='date')).mark_line(point=True).encode(
-        x='date',
-        y='value',
-        color='variable'
-    ))
+    hover = alt.selection_point(fields=['date'], nearest=True, on='mouseover', empty=False)
 
-    _j
+    source = _j.unpivot(index='date')
+
+    chart = alt.Chart(source).mark_line(point=True).encode(
+        x='date',
+        y=alt.X('value', title='Withdrawal').scale(domainMin=150_000),
+        color='variable')
+
+    #     tooltip=[alt.Tooltip('date', title='Date'), alt.Tooltip('value', title='PMT', format='$,.0f')]
+
+    tooltips = alt.Chart(source).transform_pivot(
+        'variable', value='value', groupby=['date']
+    ).mark_rule().encode(
+        x='date:T',
+        opacity=alt.condition(hover, alt.value(0.3), alt.value(0)),
+        tooltip=[alt.Tooltip('date:T', title='Date'),
+                 alt.Tooltip('pmt:Q', title='PMT', format='$,.0f'),
+                 alt.Tooltip('pmt_income_tilt:Q', title='Income Tilt', format='$,.0f'),
+                 alt.Tooltip('pmt_portfolio_tilt:Q', title='Portfolio Tilt', format='$,.0f')]
+    ).add_params(hover)
+    mo.ui.altair_chart(chart + tooltips)
+
+    #_j
     return
 
 
