@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.21.0"
 app = marimo.App()
 
 
@@ -165,7 +165,7 @@ def _(alt, income_tilt, mo, port_tilt, raw):
     mo.ui.altair_chart(chart + tooltips)
 
     #_j
-    return
+    return (hover,)
 
 
 @app.cell(hide_code=True)
@@ -221,20 +221,88 @@ def _(datetime, pl, run_query):
 
 
 @app.cell
-def _(income_tilt, income_ytd, port_tilt, raw, spending_ytd):
-    raw
-    port_tilt
-    income_tilt
-
+def _(income_tilt, income_ytd, pl, port_tilt, raw, spending_ytd):
     trend = raw.select(['date', 'target'])
 
     trend = trend.join(port_tilt.select(['date', 'target']), on='date', suffix='_portfolio_tilt')
     trend = trend.join(income_tilt.select(['date', 'target']), on='date', suffix='_spending_tilt')
+    trend = trend.with_columns(tilt = pl.min_horizontal(pl.col('target_portfolio_tilt'),
+                                 pl.col('target_spending_tilt')))
 
     trend = trend.join(income_ytd.select(['date', 'income']), on='date')
     trend = trend.join(spending_ytd.select(['date', 'spending']), on='date')
 
     trend
+    return (trend,)
+
+
+@app.cell
+def _(pl, trend):
+    # First we want to track against tilted-PMT without considering income. This is our "safest scenario" -- if we dropped our bonus income to $0 how would we be going?
+
+    _trend = trend.with_columns(pl.col('tilt').sub(pl.col('spending')).alias('tilt_trend'))
+
+    # next we want to look at tilted-PMT but add in the bonus income
+
+    _trend = _trend.with_columns(pl.col('tilt').sub(pl.col('spending')).add(pl.col('income')).alias('tilt_income_trend'))
+
+    # finally we want to look at our "upper limit" ... drop the tilt, just use raw PMT
+    # but also include bonus income
+
+    _trend = _trend.with_columns(pl.col('target').sub(pl.col('spending')).add(pl.col('income')).alias('notilt_income_trend'))
+
+    delta_trend = _trend
+    delta_trend
+    return (delta_trend,)
+
+
+@app.cell
+def _(alt, delta_trend, hover, mo, pl):
+    _source = delta_trend.select(pl.col('date'),
+                                 pl.col('tilt_trend'),
+                                 pl.col('tilt_income_trend'),
+                                 pl.col('notilt_income_trend'))
+    _source = _source.unpivot(index='date').sort('date')
+
+    _hover = alt.selection_point(fields=['date'], nearest=True, on='mouseover', empty=False)
+
+    _chart = alt.Chart(_source).mark_line(point=True).encode(
+        x='date',
+        y=alt.X('value', title='Difference'),
+        color='variable')
+
+    _tooltips = alt.Chart(_source).transform_pivot(
+        'variable', value='value', groupby=['date']
+    ).mark_rule().encode(
+        x='date:T',
+        opacity=alt.condition(hover, alt.value(0.3), alt.value(0)),
+        tooltip=[alt.Tooltip('date:T', title='Date'),
+                 alt.Tooltip('tilt_trend:Q', title='Tilt', format='$,.0f'),
+                 alt.Tooltip('tilt_income_trend:Q', title='Tilt + Income', format='$,.0f'),
+                 alt.Tooltip('notilt_income_trend:Q', title='No Tilt + Income', format='$,.0f')]
+    ).add_params(_hover)
+
+    _max_point = alt.Chart(_source).transform_window(
+        row_number = 'rank()',
+        sort = [alt.SortField('date', order='descending')]
+    ).transform_filter(
+        alt.datum.row_number == 1
+    )
+
+    # 3. Layer the Arrow (using dy to offset it above the point)
+    #_arrow = _max_point.mark_text(text='↓', fontSize=30, dy=-20).encode(
+    #    x='date:T', y='value:Q'
+    #)
+
+    # 4. Layer the Text Label
+    _text = _max_point.mark_text(dx=-25, dy=3, fontWeight='bold').encode(
+        x='date:T',
+        y='value:Q',
+        text=alt.Text('value:Q', format='$,.0f')
+    )
+    mo.ui.altair_chart(_chart + _tooltips + _text)
+
+    #_source
     return
 
 
