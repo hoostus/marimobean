@@ -252,18 +252,19 @@ def _(pl, trend):
 
     _trend = _trend.with_columns(pl.col('target').sub(pl.col('spending')).add(pl.col('income')).alias('notilt_income_trend'))
 
-    delta_trend = _trend
-    delta_trend
+    delta_trend = _trend.select(pl.col('date'),
+                                 pl.col('tilt_trend'),
+                                 pl.col('tilt_income_trend'),
+                                 pl.col('notilt_income_trend'))
+    delta_trend.sort('date', descending=True)
+
+    # Why is this missing so much data? Should have daily numbers in here?
     return (delta_trend,)
 
 
 @app.cell
-def _(alt, delta_trend, hover, mo, pl):
-    _source = delta_trend.select(pl.col('date'),
-                                 pl.col('tilt_trend'),
-                                 pl.col('tilt_income_trend'),
-                                 pl.col('notilt_income_trend'))
-    _source = _source.unpivot(index='date').sort('date')
+def _(alt, delta_trend, hover, mo):
+    _source = delta_trend.unpivot(index='date').sort('date')
 
     _hover = alt.selection_point(fields=['date'], nearest=True, on='mouseover', empty=False)
 
@@ -301,6 +302,7 @@ def _(alt, delta_trend, hover, mo, pl):
         y='value:Q',
         text=alt.Text('value:Q', format='$,.0f')
     )
+
     mo.ui.altair_chart(_chart + _tooltips + _text)
     return
 
