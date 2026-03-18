@@ -10,7 +10,8 @@ def _(alt, end_date, mo, networth, start_date):
         .encode(x=alt.X('date', title='Date'),
                 y=alt.Y('net_worth', title='Net Worth', axis=alt.Axis(format='$,.0f')).scale(domainMin=5_500_000),
                 tooltip=[alt.Tooltip('date', title='Date'), alt.Tooltip('net_worth', title='Net worth', format='$,.0f')])
-        .properties(title=alt.Title('Net Worth', subtitle=f"{start_date} to {end_date}")))
+        .properties(title=alt.Title('Net Worth', subtitle=f"{start_date} to {end_date}"),
+                   width='container'))
     return
 
 
@@ -161,10 +162,9 @@ def _(alt, income_tilt, mo, port_tilt, raw):
                  alt.Tooltip('pmt:Q', title='PMT', format='$,.0f'),
                  alt.Tooltip('pmt_income_tilt:Q', title='Income Tilt', format='$,.0f'),
                  alt.Tooltip('pmt_portfolio_tilt:Q', title='Portfolio Tilt', format='$,.0f')]
-    ).add_params(hover)
-    mo.ui.altair_chart(chart + tooltips)
+    ).add_params(hover).properties(width='container')
 
-    #_j
+    mo.ui.altair_chart(chart + tooltips)
     return (hover,)
 
 
@@ -269,7 +269,7 @@ def _(alt, delta_trend, hover, mo, pl):
     _chart = alt.Chart(_source).mark_line(point=True).encode(
         x='date',
         y=alt.X('value', title='Difference'),
-        color='variable')
+        color='variable').properties(width='container')
 
     _tooltips = alt.Chart(_source).transform_pivot(
         'variable', value='value', groupby=['date']
@@ -301,8 +301,6 @@ def _(alt, delta_trend, hover, mo, pl):
         text=alt.Text('value:Q', format='$,.0f')
     )
     mo.ui.altair_chart(_chart + _tooltips + _text)
-
-    #_source
     return
 
 
