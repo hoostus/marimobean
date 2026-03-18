@@ -86,7 +86,11 @@ def _(nws, pl):
     _nw = _nw.with_columns(fv = pl.lit(0))
     _nw = _nw.with_columns(pl.col('net_worth').cast(float))
 
-    pmts = -pmt(_nw['rate'], _nw['nper'], _nw['net_worth'], _nw['fv'])
+    pmts = -pmt(rate=_nw['rate'],
+                nper=_nw['nper'],
+                pv=_nw['net_worth'],
+                fv=_nw['fv'],
+                when='begin')
 
     _nw = _nw.with_columns(pl.Series('pmt', pmts, dtype=pl.Decimal(scale=2)))
     _nw = _nw.with_columns(day_of_year = pl.col('date').dt.ordinal_day())
@@ -127,12 +131,11 @@ def _(calculate_spend, networth, pl, pv):
         target = pv(pmt['rate'], pmt['nper'], -target_income, 0)
         return tilt_portfolio(pmt.with_columns(target = target), tilt)
 
-
     raw = calculate_spend(networth)
     port_tilt = calculate_spend(tilt_portfolio_target(networth))
     income_tilt = calculate_spend(tilt_spend_target(networth))
 
-    tilt_spend_target(networth)
+    tilt_portfolio_target(networth)
     return income_tilt, port_tilt, raw
 
 
@@ -150,8 +153,6 @@ def _(alt, income_tilt, mo, port_tilt, raw):
         x='date',
         y=alt.X('value', title='Withdrawal').scale(domainMin=150_000),
         color='variable')
-
-    #     tooltip=[alt.Tooltip('date', title='Date'), alt.Tooltip('value', title='PMT', format='$,.0f')]
 
     tooltips = alt.Chart(source).transform_pivot(
         'variable', value='value', groupby=['date']
