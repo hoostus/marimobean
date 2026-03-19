@@ -7,22 +7,55 @@ app = marimo.App(width="medium")
 @app.cell
 def _(datetime):
     today = datetime.date.today()
-    age_1 = today.year - 1975
-    age_2 = today.year - 1990
-    return age_1, age_2, today
+    return (today,)
 
 
 @app.cell
-def _(Decimal, age_1, age_2):
+def _(datetime, pl, today):
+    # We build a dataframe for expected returns to allow us to vary it over time.
+
+    def build_expected_returns_dataframe():
+        start_date = datetime.date(today.year, 1, 1)
+        end_date = datetime.date.today()
+        df = pl.date_range(
+            start=start_date, 
+            end=end_date, 
+            interval="1d", 
+            eager=True
+        ).alias("date").to_frame()
+        df = df.with_columns(
+            rate = pl.when(pl.col("date") < datetime.date(datetime.date.today().year, 2, 23))
+            .then(pl.lit(0.032))
+            .otherwise(pl.lit(0.031))
+        )
+        return df
+    expected_returns = build_expected_returns_dataframe()
+    return (expected_returns,)
+
+
+@app.cell
+def _(today):
+    # Build our life expectancy. We don't need a dataframe because this isn't going to vary substantially over the
+    # course of the few months we're looking at here.
+
     import life_expectancy as life
-    life_expectancy = Decimal(life.get_conservative_life_expectancy(
+
+    age_1 = today.year - 1975
+    age_2 = today.year - 1990
+
+    life_expectancy = life.get_conservative_life_expectancy(
         life.male, age_1,
         life.female, age_2
-    ))
+    )
+    return (life_expectancy,)
 
-    expected_returns = Decimal('0.031')
-    bequest = Decimal(0)
-    return bequest, expected_returns, life_expectancy
+
+@app.cell
+def _():
+    # We also don't need a dataframe from the bequest: how much you want left in the portfolio at the end of the
+    # period (when you are dead).
+    bequest = 0
+    return (bequest,)
 
 
 @app.cell
@@ -54,14 +87,13 @@ def _(get_price, run_query):
         fss = df['amount (FSS_INTL)'].item()
         fss_aud = fss * get_price('FSS_INTL')['amount (AUD)'].item()
         fss_usd = fss_aud * get_price('AUD')['amount (USD)'].item()
-        return usd + fss_usd
+        return float(usd + fss_usd)
 
     return (get_nw,)
 
 
 @app.cell
 def _(
-    Decimal,
     aud_usd,
     bequest,
     expected_returns,
@@ -75,22 +107,22 @@ def _(
     def calculate_pmt(date):
         networth = get_nw(date)
 
-        pmt_raw = -pmt(expected_returns, life_expectancy, networth, bequest, 1)
-        pmt_raw_aud = pmt_raw / aud_usd
+        er = expected_returns.filter(pl.col('date') == today)['rate'].item()
+        pmt_raw = -pmt(er, life_expectancy, networth, bequest, 1)
+        pmt_raw_aud = pmt_raw / float(aud_usd)
 
-        target_portfolio = Decimal(5_000_000)
-        portfolio_tilt = Decimal('0.5')
+        target_portfolio = 5_000_000
+        portfolio_tilt = 0.5
         pmt_portfolio_tilt = pmt_raw * pow(networth / target_portfolio, portfolio_tilt)
 
         target_income_aud = 225_000
-        target_income_usd = target_income_aud * aud_usd
-        target_income_portfolio = pv(expected_returns, life_expectancy, -target_income_usd, 0)
-        income_tilt = Decimal('-0.5')
+        target_income_portfolio = pv(er, life_expectancy, -target_income_aud, 0)
+        income_tilt = -0.5
         pmt_income_tilt = pmt_raw * pow(networth / target_income_portfolio, income_tilt)
 
         pmt_tilt = min(pmt_portfolio_tilt, pmt_income_tilt)
 
-        pmt_tilt_aud = pmt_tilt / aud_usd
+        pmt_tilt_aud = pmt_tilt / float(aud_usd)
 
         _df = pl.DataFrame(data={'Tilt PMT': pmt_tilt_aud, 'Raw PMT': pmt_raw_aud})
         _df = _df.with_columns(pl.all()) / 1000
@@ -381,7 +413,6 @@ def _():
 
     home_dir = Path.home()
     return (
-        Decimal,
         datetime,
         home_dir,
         load_file,
