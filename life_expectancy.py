@@ -92,5 +92,24 @@ def get_percentile_life_expectancy(percentile, table_1, age_1, table_2, age_2):
         .item()
     )
 
+def get_conservative_life_expectancy(table_1, age_1, table_2, age_2):
+    """
+        In Siegel & Waring (2014) they argue for using a "maximum life expectancy"
+        (assumed to be 120) but also suggest
+
+        'What about a blend of life expectancy and maximum life as one possible
+        compromise, supporting higher spending earlier, and lower but perhaps sufficient
+        spending later?'
+
+        That is average(life_expectancy, 120)
+
+        https://larrysiegeldotorg.wordpress.com/wp-content/uploads/2014/09/siegel_waring_only-spending-rule-article-youll-ever-need.pdf
+    """
+
+    youngest = min(age_1, age_2)
+    years_to_max = 120 - youngest
+    life_expectancy = get_percentile_life_expectancy(0.90, table_1, age_1, table_2, age_2) 
+    return (life_expectancy + years_to_max) / 2
+
 if __name__ == '__main__':
     print(get_percentile_life_expectancy(0.90, male, 50, female, 35))

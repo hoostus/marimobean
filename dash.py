@@ -1,13 +1,28 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.21.1"
 app = marimo.App(width="medium")
 
 
 @app.cell
 def _(datetime):
     today = datetime.date.today()
-    return (today,)
+    age_1 = today.year - 1975
+    age_2 = today.year - 1990
+    return age_1, age_2, today
+
+
+@app.cell
+def _(Decimal, age_1, age_2):
+    import life_expectancy as life
+    life_expectancy = Decimal(life.get_conservative_life_expectancy(
+        life.male, age_1,
+        life.female, age_2
+    ))
+
+    expected_returns = Decimal('0.031')
+    bequest = Decimal(0)
+    return bequest, expected_returns, life_expectancy
 
 
 @app.cell
@@ -45,14 +60,21 @@ def _(get_price, run_query):
 
 
 @app.cell
-def _(Decimal, aud_usd, get_nw, pl, pmt, pv, today):
+def _(
+    Decimal,
+    aud_usd,
+    bequest,
+    expected_returns,
+    get_nw,
+    life_expectancy,
+    pl,
+    pmt,
+    pv,
+    today,
+):
     def calculate_pmt(date):
-    # How to make these more visible and if-possible self-updating?
         networth = get_nw(date)
 
-        expected_returns = Decimal('0.031')
-        life_expectancy = Decimal('72.335')
-        bequest = Decimal(0)
         pmt_raw = -pmt(expected_returns, life_expectancy, networth, bequest, 1)
         pmt_raw_aud = pmt_raw / aud_usd
 
