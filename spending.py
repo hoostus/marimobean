@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.21.0"
+__generated_with = "0.21.1"
 app = marimo.App()
 
 
@@ -269,19 +269,27 @@ def _(alt, delta_trend, hover, mo):
     _hover = alt.selection_point(fields=['date'], nearest=True, on='mouseover', empty=False)
 
     _chart = alt.Chart(_source).mark_line(point=True).encode(
-        x='date',
-        y=alt.X('value', title='Difference'),
-        color='variable').properties(width='container')
+        x=alt.X('date', title='Date'),
+        y=alt.Y('value', title='Difference'),
+        color=alt.Color('variable',
+                        title='Method')).properties(width='container')
 
     _tooltips = alt.Chart(_source).transform_pivot(
-        'variable', value='value', groupby=['date']
-    ).mark_rule().encode(
+        'variable',
+        value='value',
+        groupby=['date']).mark_rule().encode(
         x='date:T',
         opacity=alt.condition(hover, alt.value(0.3), alt.value(0)),
         tooltip=[alt.Tooltip('date:T', title='Date'),
-                 alt.Tooltip('tilt_trend:Q', title='Tilt', format='$,.0f'),
-                 alt.Tooltip('tilt_income_trend:Q', title='Tilt + Income', format='$,.0f'),
-                 alt.Tooltip('notilt_income_trend:Q', title='No Tilt + Income', format='$,.0f')]
+                 alt.Tooltip('tilt_trend:Q',
+                             title='Tilt',
+                             format='$,.0f'),
+                 alt.Tooltip('tilt_income_trend:Q',
+                             title='Tilt + Income',
+                             format='$,.0f'),
+                 alt.Tooltip('notilt_income_trend:Q',
+                             title='No Tilt + Income',
+                             format='$,.0f')]
     ).add_params(_hover)
 
     _max_point = alt.Chart(_source).transform_window(
