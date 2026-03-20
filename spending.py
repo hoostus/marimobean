@@ -10,7 +10,8 @@ def _(alt, end_date, mo, networth, start_date):
         .encode(x=alt.X('date', title='Date'),
                 y=alt.Y('net_worth', title='Net Worth', axis=alt.Axis(format='$,.0f')).scale(domainMin=5_500_000),
                 tooltip=[alt.Tooltip('date', title='Date'), alt.Tooltip('net_worth', title='Net worth', format='$,.0f')])
-        .properties(title=alt.Title('Net Worth', subtitle=f"{start_date} to {end_date}"),
+        .properties(title=alt.Title('Net Worth',
+                                    subtitle=f"{start_date} to {end_date}"),
                    width='container'))
     return
 
@@ -140,6 +141,20 @@ def _(calculate_spend, networth, pl, pv):
 
 
 @app.cell
+def _(alt):
+    @alt.theme.register('dash_theme', enable=True)
+    def my_theme():
+        return {
+            'config': {
+                'font': 'Spartan League',
+                'background': '#f9f9f9',
+            }
+        }
+
+    return
+
+
+@app.cell
 def _(alt, income_tilt, mo, port_tilt, raw):
     _j = raw.select(['date', 'pmt']).join(
         port_tilt.select(['date', 'pmt']), on='date', suffix='_portfolio_tilt').join(
@@ -151,7 +166,7 @@ def _(alt, income_tilt, mo, port_tilt, raw):
 
     chart = alt.Chart(source).mark_line(point=True).encode(
         x='date',
-        y=alt.X('value', title='Withdrawal').scale(domainMin=150_000),
+        y=alt.X('value', title='Amount $').scale(domainMin=150_000),
         color='variable')
 
     tooltips = alt.Chart(source).transform_pivot(
@@ -163,7 +178,7 @@ def _(alt, income_tilt, mo, port_tilt, raw):
                  alt.Tooltip('pmt:Q', title='PMT', format='$,.0f'),
                  alt.Tooltip('pmt_income_tilt:Q', title='Income Tilt', format='$,.0f'),
                  alt.Tooltip('pmt_portfolio_tilt:Q', title='Portfolio Tilt', format='$,.0f')]
-    ).add_params(hover).properties(width='container')
+    ).add_params(hover).properties(width='container', title='Withdrawals')
 
     mo.ui.altair_chart(chart + tooltips)
     return (hover,)
@@ -233,7 +248,7 @@ def _(income_tilt, income_ytd, pl, port_tilt, raw, spending_ytd):
     trend = trend.join(income_ytd.select(['date', 'income']), on='date')
     trend = trend.join(spending_ytd.select(['date', 'spending']), on='date')
 
-    trend
+    #trend
     return (trend,)
 
 
@@ -259,6 +274,7 @@ def _(pl, trend):
     delta_trend.sort('date', descending=True)
 
     # Why is this missing so much data? Should have daily numbers in here?
+    # it doesn't even have TODAY?!
     return (delta_trend,)
 
 
@@ -305,7 +321,7 @@ def _(alt, delta_trend, hover, mo):
     #)
 
     # 4. Layer the Text Label
-    _text = _max_point.mark_text(dx=-25, dy=3, fontWeight='bold').encode(
+    _text = _max_point.mark_text(dx=-50, dy=3, fontWeight='bold').encode(
         x='date:T',
         y='value:Q',
         text=alt.Text('value:Q', format='$,.0f')
