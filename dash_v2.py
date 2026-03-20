@@ -384,7 +384,98 @@ def _(
         # so the resulting join will have nulls that we need to fill in correctly.
         return trend.fill_null(strategy='forward').fill_null(0)
 
-    build_trends(raw_pmt, tilt_portfolio_target(raw_pmt), tilt_income_target(raw_pmt))
+    def build_spending_trends():
+        return build_trends(calculate_spend(raw_pmt),
+                calculate_spend(tilt_portfolio_target(raw_pmt)),
+                calculate_spend(tilt_income_target(raw_pmt)))
+
+    return (build_spending_trends,)
+
+
+@app.cell
+def _(build_spending_trends, pl):
+    def build_progress():
+        # First we want to track against tilted-PMT without considering income. This is our "safest scenario" -- if we dropped our bonus income to $0 how would we be going?
+    
+        trend = build_spending_trends()
+        trend = trend.with_columns(pl.col('tilt').sub(pl.col('spending')).alias('tilt_trend'))
+    
+        # next we want to look at tilted-PMT but add in the bonus income
+    
+        trend = trend.with_columns(pl.col('tilt').sub(pl.col('spending')).add(pl.col('income')).alias('tilt_income_trend'))
+    
+        # finally we want to look at our "upper limit" ... drop the tilt, just use raw PMT
+        # but also include bonus income
+    
+        trend = trend.with_columns(pl.col('target')
+            .sub(pl.col('spending'))
+            .add(pl.col('income'))
+            .alias('notilt_income_trend'))
+    
+        delta_trend = trend.select(pl.col('date'),
+                                     pl.col('tilt_trend'),
+                                     pl.col('tilt_income_trend'),
+                                     pl.col('notilt_income_trend'))
+        return delta_trend.sort('date', descending=True)
+
+    build_progress()
+    return (build_progress,)
+
+
+@app.cell
+def _(alt, build_progress, mo):
+    def chart_spending(trend):
+        source = trend.rename({
+            'tilt_trend': 'Tilt',
+            'tilt_income_trend': 'Tilt + Income',
+            'notilt_income_trend': 'No Tilt + Income'
+        }).unpivot(index='date').sort('date')
+    
+        hover = alt.selection_point(fields=['date'], nearest=True, on='mouseover', empty=False)
+    
+        chart = alt.Chart(source).mark_line(point=True).encode(
+            x=alt.X('date', title='Date'),
+            y=alt.Y('value', title='Difference'),
+            color=alt.Color('variable',
+                            title='Method')).properties(width='container')
+    
+        tooltips = alt.Chart(source).transform_pivot(
+            'variable',
+            value='value',
+            groupby=['date']).mark_rule().encode(
+            x='date:T',
+            opacity=alt.condition(hover, alt.value(0.3), alt.value(0)),
+            tooltip=[alt.Tooltip('date:T', title='Date'),
+                     alt.Tooltip('Tilt:Q',
+                                 format='$,.0f'),
+                     alt.Tooltip('Tilt + Income:Q',
+                                 format='$,.0f'),
+                     alt.Tooltip('No Tilt + Income:Q',
+                                 format='$,.0f')]
+        ).add_params(hover)
+    
+        max_point = alt.Chart(source).transform_window(
+            row_number = 'rank()',
+            sort = [alt.SortField('date', order='descending')]
+        ).transform_filter(
+            alt.datum.row_number == 1
+        )
+    
+        # 3. Layer the Arrow (using dy to offset it above the point)
+        #_arrow = _max_point.mark_text(text='↓', fontSize=30, dy=-20).encode(
+        #    x='date:T', y='value:Q'
+        #)
+    
+        # 4. Layer the Text Label
+        text = max_point.mark_text(dx=-50, dy=3, fontWeight='bold').encode(
+            x='date:T',
+            y='value:Q',
+            text=alt.Text('value:Q', format='$,.0f')
+        )
+
+        return chart + tooltips + text
+
+    mo.ui.altair_chart(chart_spending(build_progress()))
     return
 
 
