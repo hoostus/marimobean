@@ -7,11 +7,9 @@ app = marimo.App(width="medium")
 @app.cell(hide_code=True)
 def _(mo):
     mo.md(r"""
-    # Faster Net Worth Chart
+    # Even Faster Net Worth Chart
 
-    This uses ev2geny's Summator to calculate net worth faster.
-
-    It still is slow! Because reducing a beancount inventory against a beancount pricemap for each day of the year, over multiple years, takes time. On my computer is seems to take approximately 1ms for each day using the huge-example.beancount. So 1,000 days (~2.7 years) is 1 second and the full beancount file (2008-2015) takes 7.8 seconds.
+    Uses fastnetworth to calculate networth even faster.
     """)
     return
 
@@ -69,33 +67,21 @@ def _(datetime, year_slider):
 def _(
     CURRENCY,
     account_re,
-    beancount,
     datetime,
     end_date,
     entries,
-    options,
+    get_networth_series,
     start_date,
-    summator,
+    time,
 ):
     def daterange(start_date: datetime.date, end_date: datetime.date):
         days = int((end_date - start_date).days)
         for n in range(days):
             yield start_date + datetime.timedelta(n)
 
-    def get_nws(start_date, end_date, account_re):
-        summer = summator.BeanSummator(entries, options, account_re)
-
-        price_map = beancount.core.prices.build_price_map(entries)
-
-        nws = {'date': [], 'net_worth': []}
-
-        for d in daterange(start_date, end_date):
-            sum = summer.sum_till_date(d)
-            nws['date'].append(d.isoformat())
-            nws['net_worth'].append(sum.convert(CURRENCY, price_map, d).sum_all().get_currency_units(CURRENCY).number)
-
-        return nws
-    nws = get_nws(start_date, end_date, account_re)
+    _t0 = time.perf_counter()
+    nws = get_networth_series(entries, CURRENCY, daterange(start_date, end_date), account_re)
+    #print(f"get_networth_series took {time.perf_counter() - _t0:.3f}s")
     return (nws,)
 
 
@@ -148,24 +134,24 @@ def _():
     from beancount.loader import load_file
     from beancount.parser import printer
     from beanquery.query import run_query as run_bql_query
-    import beancount.core.prices
 
     import datetime
+    import time
     from pathlib import Path
 
-    import summator
+    from fastnetworth import get_networth_series
 
     home_dir = Path.home()
     return (
         alt,
-        beancount,
         datetime,
+        get_networth_series,
         load_file,
         mo,
         pl,
         printer,
         run_bql_query,
-        summator,
+        time,
     )
 
 
