@@ -5,49 +5,179 @@ app = marimo.App(width="medium")
 
 
 @app.cell
-def _():
-    import marimo as mo
-    import altair as alt
-    import polars as pl
-    from great_tables import GT
-    import panel as pn
-    pn.extension()
+def _(
+    calculate_spend,
+    mo,
+    pl,
+    raw_pmt,
+    spending_ytd,
+    tilt_portfolio_target,
+    today,
+):
+    _df = calculate_spend(tilt_portfolio_target(raw_pmt)).join(
+        spending_ytd,
+        on='date',
+        how='left').sort('date').fill_null(strategy='forward').fill_null(0).with_columns(
+        pl.col('spending') / pl.col('pmt') * 100)
 
-    from beancount.loader import load_file
-    from beancount.parser import printer
-    from beanquery.query import run_query as run_bql_query
-    from beancount.core import data
-    import beancount.core.prices
+    _doy = int(today.timetuple().tm_yday / 365 * 100)
+    _spend = int(_df['spending'].last())
 
-    import datetime
-    from pathlib import Path
-    import math
+    if _doy >= _spend:
+        _style = 'green'
+    else:
+        _style = 'red'
 
-    from numpy_financial import pmt, pv
+    mo.hstack((mo.md(f'# {today}'),
+                mo.md(f"Tilt: {_spend}%").style(color=_style),
+                mo.md(f"Date: {_doy}%").style(color='grey')))
+    return
 
-    import summator
-    import life_expectancy
 
-    home_dir = Path.home()
-    today = datetime.date.today()
-    return (
-        alt,
-        beancount,
-        datetime,
-        home_dir,
-        life_expectancy,
-        load_file,
-        math,
-        mo,
-        pl,
-        pmt,
-        pn,
-        printer,
-        pv,
-        run_bql_query,
-        summator,
-        today,
-    )
+@app.cell
+def _(alt, build_progress, mo):
+    def _chart_spending(trend):
+        source = trend.rename({
+            'tilt_trend': 'Tilt',
+            'tilt_income_trend': 'Tilt + Income',
+            'notilt_income_trend': 'No Tilt + Income'
+        }).unpivot(index='date').sort('date')
+
+        hover = alt.selection_point(fields=['date'], nearest=True, on='mouseover', empty=False)
+
+        chart = alt.Chart(source).mark_line(point=True).encode(
+            x=alt.X('date', title='Date'),
+            y=alt.Y('value', title='Difference'),
+            color=alt.Color('variable',
+                            title='Method')).properties(width='container')
+
+        tooltips = alt.Chart(source).transform_pivot(
+            'variable',
+            value='value',
+            groupby=['date']).mark_rule().encode(
+            x='date:T',
+            opacity=alt.condition(hover, alt.value(0.3), alt.value(0)),
+            tooltip=[alt.Tooltip('date:T', title='Date'),
+                     alt.Tooltip('Tilt:Q',
+                                 format='$,.0f'),
+                     alt.Tooltip('Tilt + Income:Q',
+                                 format='$,.0f'),
+                     alt.Tooltip('No Tilt + Income:Q',
+                                 format='$,.0f')]
+        ).add_params(hover)
+
+        max_point = alt.Chart(source).transform_window(
+            row_number = 'rank()',
+            sort = [alt.SortField('date', order='descending')]
+        ).transform_filter(
+            alt.datum.row_number == 1
+        )
+
+        # 3. Layer the Arrow (using dy to offset it above the point)
+        #_arrow = _max_point.mark_text(text='↓', fontSize=30, dy=-20).encode(
+        #    x='date:T', y='value:Q'
+        #)
+
+        # 4. Layer the Text Label
+        text = max_point.mark_text(dx=-50, dy=3, fontWeight='bold').encode(
+            x='date:T',
+            y='value:Q',
+            text=alt.Text('value:Q', format='$,.0f')
+        )
+
+        return chart + tooltips + text
+
+    mo.ui.altair_chart(_chart_spending(build_progress()))
+    return
+
+
+@app.cell
+def _(estimate_spending, pn, raw_pmt, spending_ytd, tilt_portfolio_target):
+    def _make_indicators():
+        def get_last(df, field):
+            n = df.sort('date')[field].last()
+            return round(int(n), -3)
+
+        ytd = pn.indicators.Number(
+            name = 'YTD Spend',
+            value = spending_ytd['spending'].last(),
+            format = '${value:,.0f}',
+            colors = [(0, 'red'), (500_000, 'green')]
+        )
+
+        projected = pn.indicators.Number(
+            name = 'Projected Spend',
+            value = estimate_spending(spending_ytd),
+            format = '${value:,.0f}',
+            colors = [(0, 'white'), (500_000, 'grey')]
+        )
+
+        tiltpmt = pn.indicators.Number(
+            name = 'Tilt PMT',
+            value = get_last(tilt_portfolio_target(raw_pmt), 'pmt'),
+            format = '${value:,.0f}',
+            colors = [(0, 'red'), (500_000, 'green')]
+        )
+
+        rawpmt = pn.indicators.Number(
+            name = 'Raw PMT',
+            value = get_last(raw_pmt, 'pmt'),
+            format = '${value:,.0f}',
+            colors = [(0, 'white'), (500_000, 'grey')]
+        )
+
+        return (ytd, projected, tiltpmt, rawpmt)
+
+    pn.GridBox(*_make_indicators(), ncols=2)
+    return
+
+
+@app.cell
+def _(get_holdings, math, mo, pl, run_query, today):
+    def estimate_dividends():
+        df = run_query(f"""
+        select date,description from #events where type = 'dividend'
+        """)
+        df = df.with_columns(pl.col("description").str.split_exact(':', 1))
+        df = df.with_columns(pl.col("description").struct.rename_fields(['etf', 'dividend'])).unnest('description')
+        df = df.with_columns(pl.col('dividend').str.strip_chars())
+        df = df.with_columns(pl.col('dividend').cast(pl.Decimal(10, 6)))
+        df = df.with_columns(pl.col('date').dt.quarter().alias('q'))
+
+        # we may need to massage some of the Quarters.
+        # If their ex-div date is very close to the end of a quarter (e.g. December 30)
+        # then the actual pay date recorded in beancount may be in the following quarter (e.g. January 3)
+        # So for anything date whose Month is 1, 4, 7, 10 we use the previous quarter.
+        # That is: January payments become Q4 dividends, April payments become Q2 dividends, and so on.
+        df = df.with_columns(pl.when(pl.col('date').dt.month().is_in([1, 4, 7, 10]))
+                        .then(pl.col('q') - 1)
+                        .otherwise(pl.col('q')))
+
+        # only use the most recent 2 years (8 quarters)
+        df = df.sort('date', descending=True).group_by('etf').tail(8)
+
+        # This gets the average dividend for each quarter for each ETF
+        df = df.group_by('etf', 'q').mean()
+
+        # we need to transpose it so we can join to it
+        hold = get_holdings().transpose(include_header=True, column_names=['holding']).rename({'column': 'etf'})
+
+        df = df.join(hold, on='etf')
+        df = df.with_columns(pl.col('dividend').mul(pl.col('holding')).alias('div_amt'))
+
+        return df.group_by('q').agg(pl.col('div_amt').sum())
+
+    _est = estimate_dividends()
+
+    todays_quarter = math.floor((today.month - 1) / 3) + 1
+
+    _div_next_q = _est.filter(pl.col('q') == todays_quarter)['div_amt'].item()
+    _div_annual = _est.sum()['div_amt'].item()
+
+    mo.hstack([mo.md('# Estimated Dividends'),
+              mo.md(f"Next Q{todays_quarter}: ${_div_next_q:,.0f}").style(),
+              mo.md(f"Year: ${_div_annual:,.0f}").style()])
+    return
 
 
 @app.cell
@@ -62,31 +192,6 @@ def _(alt):
         }
 
     return
-
-
-@app.cell
-def _(home_dir):
-    beancount_file = f'{home_dir}/Documents/beancount/my.bean'
-    return (beancount_file,)
-
-
-@app.cell
-def _(beancount_file, load_file, printer):
-    entries, _errors, options = load_file(beancount_file)
-    printer.print_errors(_errors)
-    return entries, options
-
-
-@app.cell
-def _(entries, options, pl, run_bql_query):
-    def run_query(query):
-        """ Convert a beancount BQL query result to a polars dataframe """
-        cols, rows = run_bql_query(entries, options, query, numberify=True)
-        schema = [k.name for k in cols]
-        df = pl.DataFrame(schema=schema, data=rows, orient='row', infer_schema_length=None)
-        return df
-
-    return (run_query,)
 
 
 @app.cell
@@ -429,63 +534,6 @@ def _(build_spending_trends, pl):
 
 
 @app.cell
-def _(alt, build_progress, mo):
-    def _chart_spending(trend):
-        source = trend.rename({
-            'tilt_trend': 'Tilt',
-            'tilt_income_trend': 'Tilt + Income',
-            'notilt_income_trend': 'No Tilt + Income'
-        }).unpivot(index='date').sort('date')
-
-        hover = alt.selection_point(fields=['date'], nearest=True, on='mouseover', empty=False)
-
-        chart = alt.Chart(source).mark_line(point=True).encode(
-            x=alt.X('date', title='Date'),
-            y=alt.Y('value', title='Difference'),
-            color=alt.Color('variable',
-                            title='Method')).properties(width='container')
-
-        tooltips = alt.Chart(source).transform_pivot(
-            'variable',
-            value='value',
-            groupby=['date']).mark_rule().encode(
-            x='date:T',
-            opacity=alt.condition(hover, alt.value(0.3), alt.value(0)),
-            tooltip=[alt.Tooltip('date:T', title='Date'),
-                     alt.Tooltip('Tilt:Q',
-                                 format='$,.0f'),
-                     alt.Tooltip('Tilt + Income:Q',
-                                 format='$,.0f'),
-                     alt.Tooltip('No Tilt + Income:Q',
-                                 format='$,.0f')]
-        ).add_params(hover)
-
-        max_point = alt.Chart(source).transform_window(
-            row_number = 'rank()',
-            sort = [alt.SortField('date', order='descending')]
-        ).transform_filter(
-            alt.datum.row_number == 1
-        )
-
-        # 3. Layer the Arrow (using dy to offset it above the point)
-        #_arrow = _max_point.mark_text(text='↓', fontSize=30, dy=-20).encode(
-        #    x='date:T', y='value:Q'
-        #)
-
-        # 4. Layer the Text Label
-        text = max_point.mark_text(dx=-50, dy=3, fontWeight='bold').encode(
-            x='date:T',
-            y='value:Q',
-            text=alt.Text('value:Q', format='$,.0f')
-        )
-
-        return chart + tooltips + text
-
-    mo.ui.altair_chart(_chart_spending(build_progress()))
-    return
-
-
-@app.cell
 def _(
     account_re,
     alt,
@@ -505,42 +553,24 @@ def _(
             excess = pl.col('net_worth') - pl.col('target')
         ).select(pl.col('date'), pl.col('excess'))
 
-    mo.ui.altair_chart(
-        alt.Chart(calculate_excess()).mark_line()
-    ).encode(
-        x = 'date',
-        y = 'excess'
-    ).properties(width='container')
-    return
+    def _chart_excess():
+        source = calculate_excess()
+        hover = alt.selection_point(fields=['date'], nearest=True, on='mouseover', empty=False)
 
+        tooltips = alt.Chart(source).mark_rule().encode(
+            x='date:T',
+            opacity=alt.condition(hover, alt.value(0.3), alt.value(0)),
+            tooltip=[alt.Tooltip('date:T', title='Date'),
+                     alt.Tooltip('excess', title='Excess', format='$,.0f')]).add_params(hover).properties(width='container')
 
-@app.cell
-def _(
-    calculate_spend,
-    mo,
-    pl,
-    raw_pmt,
-    spending_ytd,
-    tilt_portfolio_target,
-    today,
-):
-    _df = calculate_spend(tilt_portfolio_target(raw_pmt)).join(
-        spending_ytd,
-        on='date',
-        how='left').sort('date').fill_null(strategy='forward').fill_null(0).with_columns(
-        pl.col('spending') / pl.col('pmt') * 100)
+        chart = alt.Chart(source).mark_line().encode(
+            x = 'date',
+            y = 'excess'
+        ).properties(title='Excess Portfolio')
 
-    _doy = int(today.timetuple().tm_yday / 365 * 100)
-    _spend = int(_df['spending'].last())
+        return chart + tooltips
 
-    if _doy >= _spend:
-        _style = 'green'
-    else:
-        _style = 'red'
-
-    mo.hstack((mo.md(f'# {today}'),
-                mo.md(f"Tilt: {_spend}%").style(color=_style),
-                mo.md(f"Date: {_doy}%").style(color='grey')))
+    mo.ui.altair_chart(_chart_excess())
     return
 
 
@@ -584,47 +614,6 @@ def _(datetime, pl, run_query, today):
 
 
 @app.cell
-def _(estimate_spending, pn, raw_pmt, spending_ytd, tilt_portfolio_target):
-    def _make_indicators():
-        def get_last(df, field):
-            n = df.sort('date')[field].last()
-            return round(int(n), -3)
-
-        ytd = pn.indicators.Number(
-            name = 'YTD Spend',
-            value = spending_ytd['spending'].last(),
-            format = '${value:,.0f}',
-            colors = [(0, 'red'), (500_000, 'green')]
-        )
-
-        projected = pn.indicators.Number(
-            name = 'Projected Spend',
-            value = estimate_spending(spending_ytd),
-            format = '${value:,.0f}',
-            colors = [(0, 'white'), (500_000, 'grey')]
-        )
-
-        tiltpmt = pn.indicators.Number(
-            name = 'Tilt PMT',
-            value = get_last(tilt_portfolio_target(raw_pmt), 'pmt'),
-            format = '${value:,.0f}',
-            colors = [(0, 'red'), (500_000, 'green')]
-        )
-
-        rawpmt = pn.indicators.Number(
-            name = 'Raw PMT',
-            value = get_last(raw_pmt, 'pmt'),
-            format = '${value:,.0f}',
-            colors = [(0, 'white'), (500_000, 'grey')]
-        )
-
-        return (ytd, projected, tiltpmt, rawpmt)
-
-    pn.GridBox(*_make_indicators(), ncols=2)
-    return
-
-
-@app.cell
 def _(run_query):
     def get_holdings():
         df = run_query(f"""
@@ -636,7 +625,7 @@ def _(run_query):
 
         # the column names are 'units (VTI)' and we just want 'VTI'
         df = df.rename(lambda c: c.replace('units (', '')).rename(lambda c: c.replace(')', ''))
-    
+
         # Want the name to match what we capture in the events table.
         # Note that VEU's dividends are tracked in USD.
         return df.rename({'VEU_AX': 'VEU'})
@@ -645,51 +634,74 @@ def _(run_query):
 
 
 @app.cell
-def _(get_holdings, math, mo, pl, run_query, today):
-    def estimate_dividends():
-        df = run_query(f"""
-        select date,description from #events where type = 'dividend'
-        """)
-        df = df.with_columns(pl.col("description").str.split_exact(':', 1))
-        df = df.with_columns(pl.col("description").struct.rename_fields(['etf', 'dividend'])).unnest('description')
-        df = df.with_columns(pl.col('dividend').str.strip_chars())
-        df = df.with_columns(pl.col('dividend').cast(pl.Decimal(10, 6)))
-        df = df.with_columns(pl.col('date').dt.quarter().alias('q'))
-    
-        # we may need to massage some of the Quarters.
-        # If their ex-div date is very close to the end of a quarter (e.g. December 30)
-        # then the actual pay date recorded in beancount may be in the following quarter (e.g. January 3)
-        # So for anything date whose Month is 1, 4, 7, 10 we use the previous quarter.
-        # That is: January payments become Q4 dividends, April payments become Q2 dividends, and so on.
-        df = df.with_columns(pl.when(pl.col('date').dt.month().is_in([1, 4, 7, 10]))
-                        .then(pl.col('q') - 1)
-                        .otherwise(pl.col('q')))
-    
-        # only use the most recent 2 years (8 quarters)
-        df = df.sort('date', descending=True).group_by('etf').tail(8)
-    
-        # This gets the average dividend for each quarter for each ETF
-        df = df.group_by('etf', 'q').mean()
-    
-        # we need to transpose it so we can join to it
-        hold = get_holdings().transpose(include_header=True, column_names=['holding']).rename({'column': 'etf'})
-    
-        df = df.join(hold, on='etf')
-        df = df.with_columns(pl.col('dividend').mul(pl.col('holding')).alias('div_amt'))
-    
-        return df.group_by('q').agg(pl.col('div_amt').sum())
+def _():
+    import marimo as mo
+    import altair as alt
+    import polars as pl
+    from great_tables import GT
+    import panel as pn
+    pn.extension()
 
-    _est = estimate_dividends()
+    from beancount.loader import load_file
+    from beancount.parser import printer
+    from beanquery.query import run_query as run_bql_query
+    from beancount.core import data
+    import beancount.core.prices
 
-    todays_quarter = math.floor((today.month - 1) / 3) + 1
+    import datetime
+    from pathlib import Path
+    import math
 
-    _div_next_q = _est.filter(pl.col('q') == todays_quarter)['div_amt'].item()
-    _div_annual = _est.sum()['div_amt'].item()
+    from numpy_financial import pmt, pv
 
-    mo.hstack([mo.md('# Estimated Dividends'),
-              mo.md(f"Next Q{todays_quarter}: ${_div_next_q:,.0f}").style(),
-              mo.md(f"Year: ${_div_annual:,.0f}").style()])
-    return
+    import summator
+    import life_expectancy
+
+    home_dir = Path.home()
+    today = datetime.date.today()
+    return (
+        alt,
+        beancount,
+        datetime,
+        home_dir,
+        life_expectancy,
+        load_file,
+        math,
+        mo,
+        pl,
+        pmt,
+        pn,
+        printer,
+        pv,
+        run_bql_query,
+        summator,
+        today,
+    )
+
+
+@app.cell
+def _(home_dir):
+    beancount_file = f'{home_dir}/Documents/beancount/my.bean'
+    return (beancount_file,)
+
+
+@app.cell
+def _(beancount_file, load_file, printer):
+    entries, _errors, options = load_file(beancount_file)
+    printer.print_errors(_errors)
+    return entries, options
+
+
+@app.cell
+def _(entries, options, pl, run_bql_query):
+    def run_query(query):
+        """ Convert a beancount BQL query result to a polars dataframe """
+        cols, rows = run_bql_query(entries, options, query, numberify=True)
+        schema = [k.name for k in cols]
+        df = pl.DataFrame(schema=schema, data=rows, orient='row', infer_schema_length=None)
+        return df
+
+    return (run_query,)
 
 
 if __name__ == "__main__":
