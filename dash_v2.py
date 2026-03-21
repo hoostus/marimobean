@@ -5,6 +5,36 @@ app = marimo.App(width="medium")
 
 
 @app.cell
+def _(beancount_loader_errors, mo, printer):
+    # Sanity check our beancount file.
+    # Does everything have a payee? (./problems.sh)
+    # Is all the vacation spending in a leaf-account?
+    # Are there any flagged transactions?
+
+    mo.md(f"""
+    {printer.print_errors(beancount_loader_errors)}
+    """) if beancount_loader_errors else None
+    return
+
+
+@app.cell
+def _(run_query):
+    _p = run_query(f"""
+    select
+        flag, payee, filename, lineno, sum(convert(position, 'AUD', date)) as spent
+    where
+        year = year(today())
+        and payee is NULL
+        and flag != 'p'
+    order by
+        lineno asc
+    """)
+
+    _p if not _p.is_empty() else None
+    return
+
+
+@app.cell
 def _(
     calculate_spend,
     mo,
@@ -79,7 +109,7 @@ def _(alt, build_progress, mo):
         #)
 
         # 4. Layer the Text Label
-        text = max_point.mark_text(dx=-50, dy=3, fontWeight='bold').encode(
+        text = max_point.mark_text(dx=-30, dy=25, fontWeight='bold', fontSize=14).encode(
             x='date:T',
             y='value:Q',
             text=alt.Text('value:Q', format='$,.0f')
@@ -264,11 +294,19 @@ def _(mo, pl, run_query, today):
 
 
 @app.cell
-def _(CURRENCY, beancount, daterange, entries, options, pl, summator):
+def _(
+    CURRENCY,
+    beancount,
+    beancount_entries,
+    beancount_options,
+    daterange,
+    pl,
+    summator,
+):
     def get_nws(start_date, end_date, account_re):
-        summer = summator.BeanSummator(entries, options, account_re)
+        summer = summator.BeanSummator(beancount_entries, beancount_options, account_re)
 
-        price_map = beancount.core.prices.build_price_map(entries)
+        price_map = beancount.core.prices.build_price_map(beancount_entries)
 
         nws = {'date': [], 'net_worth': []}
 
@@ -686,17 +724,16 @@ def _(home_dir):
 
 
 @app.cell
-def _(beancount_file, load_file, printer):
-    entries, _errors, options = load_file(beancount_file)
-    printer.print_errors(_errors)
-    return entries, options
+def _(beancount_file, load_file):
+    beancount_entries, beancount_loader_errors, beancount_options = load_file(beancount_file)
+    return beancount_entries, beancount_loader_errors, beancount_options
 
 
 @app.cell
-def _(entries, options, pl, run_bql_query):
+def _(beancount_entries, beancount_options, pl, run_bql_query):
     def run_query(query):
         """ Convert a beancount BQL query result to a polars dataframe """
-        cols, rows = run_bql_query(entries, options, query, numberify=True)
+        cols, rows = run_bql_query(beancount_entries, beancount_options, query, numberify=True)
         schema = [k.name for k in cols]
         df = pl.DataFrame(schema=schema, data=rows, orient='row', infer_schema_length=None)
         return df
