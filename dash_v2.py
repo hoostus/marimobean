@@ -262,13 +262,17 @@ def _(pl, pv):
         target = 7_000_000
         return tilt_portfolio(df.with_columns(target = pl.lit(target)), tilt)
 
-    def tilt_income_target(pmt):
-        target_income = 225_000
-        tilt = -0.5
+    def target_from_income(pmt):
+        target_income = 250_000
         target = pv(pmt['rate'], pmt['nper'], -target_income, 0)
+        return target
+
+    def tilt_income_target(pmt):
+        tilt = -0.5
+        target = target_from_income(pmt)
         return tilt_portfolio(pmt.with_columns(target = target), tilt)
 
-    return tilt_income_target, tilt_portfolio_target
+    return target_from_income, tilt_income_target, tilt_portfolio_target
 
 
 @app.cell
@@ -332,14 +336,14 @@ def _(
         })
 
         hover = alt.selection_point(fields=['date'], nearest=True, on='mouseover', empty=False)
-    
+
         source = _j.unpivot(index='date')
-    
+
         chart = alt.Chart(source).mark_line(point=True).encode(
             x='date',
             y=alt.X('value', title='Amount $').scale(domainMin=150_000),
             color='variable')
-    
+
         tooltips = alt.Chart(source).transform_pivot(
             'variable', value='value', groupby=['date']
         ).mark_rule().encode(
@@ -352,7 +356,7 @@ def _(
         ).add_params(hover).properties(width='container', title='Withdrawals')
 
         return chart + tooltips
-    
+
     mo.ui.altair_chart(chart_tilts(calculate_spend(raw_pmt),
                                   calculate_spend(tilt_portfolio_target(raw_pmt)),
                                   calculate_spend(tilt_income_target(raw_pmt))))
@@ -371,12 +375,12 @@ def _(
 ):
     def build_trends(raw, portfolio, income):
         trend = calculate_spend(raw).select(['date', 'target'])
-    
+
         trend = trend.join(portfolio.select(['date', 'target']), on='date', suffix='_portfolio_tilt')
         trend = trend.join(income.select(['date', 'target']), on='date', suffix='_spending_tilt')
         trend = trend.with_columns(tilt = pl.min_horizontal(pl.col('target_portfolio_tilt'),
                                      pl.col('target_spending_tilt')))
-    
+
         trend = trend.join(income_ytd.select(['date', 'income']), on='date', how='left')
         trend = trend.join(spending_ytd.select(['date', 'spending']), on='date', how='left')
 
@@ -396,22 +400,22 @@ def _(
 def _(build_spending_trends, pl):
     def build_progress():
         # First we want to track against tilted-PMT without considering income. This is our "safest scenario" -- if we dropped our bonus income to $0 how would we be going?
-    
+
         trend = build_spending_trends()
         trend = trend.with_columns(pl.col('tilt').sub(pl.col('spending')).alias('tilt_trend'))
-    
+
         # next we want to look at tilted-PMT but add in the bonus income
-    
+
         trend = trend.with_columns(pl.col('tilt').sub(pl.col('spending')).add(pl.col('income')).alias('tilt_income_trend'))
-    
+
         # finally we want to look at our "upper limit" ... drop the tilt, just use raw PMT
         # but also include bonus income
-    
+
         trend = trend.with_columns(pl.col('target')
             .sub(pl.col('spending'))
             .add(pl.col('income'))
             .alias('notilt_income_trend'))
-    
+
         delta_trend = trend.select(pl.col('date'),
                                      pl.col('tilt_trend'),
                                      pl.col('tilt_income_trend'),
@@ -430,15 +434,15 @@ def _(alt, build_progress, mo):
             'tilt_income_trend': 'Tilt + Income',
             'notilt_income_trend': 'No Tilt + Income'
         }).unpivot(index='date').sort('date')
-    
+
         hover = alt.selection_point(fields=['date'], nearest=True, on='mouseover', empty=False)
-    
+
         chart = alt.Chart(source).mark_line(point=True).encode(
             x=alt.X('date', title='Date'),
             y=alt.Y('value', title='Difference'),
             color=alt.Color('variable',
                             title='Method')).properties(width='container')
-    
+
         tooltips = alt.Chart(source).transform_pivot(
             'variable',
             value='value',
@@ -453,19 +457,19 @@ def _(alt, build_progress, mo):
                      alt.Tooltip('No Tilt + Income:Q',
                                  format='$,.0f')]
         ).add_params(hover)
-    
+
         max_point = alt.Chart(source).transform_window(
             row_number = 'rank()',
             sort = [alt.SortField('date', order='descending')]
         ).transform_filter(
             alt.datum.row_number == 1
         )
-    
+
         # 3. Layer the Arrow (using dy to offset it above the point)
         #_arrow = _max_point.mark_text(text='↓', fontSize=30, dy=-20).encode(
         #    x='date:T', y='value:Q'
         #)
-    
+
         # 4. Layer the Text Label
         text = max_point.mark_text(dx=-50, dy=3, fontWeight='bold').encode(
             x='date:T',
@@ -476,6 +480,65 @@ def _(alt, build_progress, mo):
         return chart + tooltips + text
 
     mo.ui.altair_chart(chart_spending(build_progress()))
+    return
+
+
+@app.cell
+def _(
+    account_re,
+    alt,
+    end_date,
+    get_nws,
+    mo,
+    pl,
+    raw_pmt,
+    start_date,
+    target_from_income,
+):
+    # This shows us how much "extra" we have for large capital purchases
+    def calculate_excess():
+        return get_nws(start_date, end_date, account_re).with_columns(
+            target = target_from_income(raw_pmt)
+        ).with_columns(
+            excess = pl.col('net_worth') - pl.col('target')
+        ).select(pl.col('date'), pl.col('excess'))
+
+    mo.ui.altair_chart(
+        alt.Chart(calculate_excess()).mark_line()
+    ).encode(
+        x = 'date',
+        y = 'excess'
+    ).properties(width='container')
+    return
+
+
+@app.cell
+def _(
+    calculate_spend,
+    mo,
+    pl,
+    raw_pmt,
+    spending_ytd,
+    tilt_portfolio_target,
+    today,
+):
+    _df = calculate_spend(tilt_portfolio_target(raw_pmt)).join(
+        spending_ytd,
+        on='date',
+        how='left').sort('date').fill_null(strategy='forward').fill_null(0).with_columns(
+        pl.col('spending') / pl.col('pmt') * 100)
+
+    _doy = int(today.timetuple().tm_yday / 365 * 100)
+    _spend = int(_df['spending'].last())
+
+    if _doy >= _spend:
+        _style = 'green'
+    else:
+        _style = 'red'
+
+    mo.hstack((mo.md(f'# {today}'),
+                mo.md(f"Tilt: {_spend}%").style(color=_style),
+                mo.md(f"Date: {_doy}%").style(color='grey')))
     return
 
 
