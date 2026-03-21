@@ -37,9 +37,11 @@ def _():
         home_dir,
         life_expectancy,
         load_file,
+        math,
         mo,
         pl,
         pmt,
+        pn,
         printer,
         pv,
         run_bql_query,
@@ -422,13 +424,13 @@ def _(build_spending_trends, pl):
                                      pl.col('notilt_income_trend'))
         return delta_trend.sort('date', descending=True)
 
-    build_progress()
+    #build_progress()
     return (build_progress,)
 
 
 @app.cell
 def _(alt, build_progress, mo):
-    def chart_spending(trend):
+    def _chart_spending(trend):
         source = trend.rename({
             'tilt_trend': 'Tilt',
             'tilt_income_trend': 'Tilt + Income',
@@ -479,7 +481,7 @@ def _(alt, build_progress, mo):
 
         return chart + tooltips + text
 
-    mo.ui.altair_chart(chart_spending(build_progress()))
+    mo.ui.altair_chart(_chart_spending(build_progress()))
     return
 
 
@@ -539,6 +541,154 @@ def _(
     mo.hstack((mo.md(f'# {today}'),
                 mo.md(f"Tilt: {_spend}%").style(color=_style),
                 mo.md(f"Date: {_doy}%").style(color='grey')))
+    return
+
+
+@app.cell
+def _(datetime, pl, run_query, today):
+    # Estimate our projected spending for the year based on past expenses
+    # and what we've spent so far this year.
+
+    def estimate_spending(spend_df):
+        ytd_spend = spend_df.sort('date')['spending'].last()
+
+        start_trend = datetime.date(2025, 1, 1)
+        days_since = today - start_trend
+        day_of_year = today.timetuple().tm_yday
+
+        # We're trying to get estimate of "required" or
+        # "non-discretionary" spending, which is always going
+        # to be a somewhat fuzzy & arbitrary distinction. We will
+        # remove accounts that are "discretionary" or "one-off"
+        total_spend = run_query(f"""
+        select
+            sum(convert(cost(position), 'AUD', date)) as balance
+        where
+            account ~ 'Expenses:'
+            and not account ~ 'Expenses:Vacation:'
+            and account != 'Expenses:Everyday:Household-Goods'
+            and account != 'Expenses:Everyday:House-Renovation'
+            and date >= {start_trend.isoformat()}
+        """)
+
+        daily_spend = total_spend / days_since.days
+        days_left = 365 - day_of_year
+        remainder = daily_spend * days_left
+        estimate = (ytd_spend + remainder)
+
+        s = estimate.select(pl.nth(0)).to_series().last()
+        return round(int(s), -3)
+
+    #estimate_spending()
+    return (estimate_spending,)
+
+
+@app.cell
+def _(estimate_spending, pn, raw_pmt, spending_ytd, tilt_portfolio_target):
+    def _make_indicators():
+        def get_last(df, field):
+            n = df.sort('date')[field].last()
+            return round(int(n), -3)
+
+        ytd = pn.indicators.Number(
+            name = 'YTD Spend',
+            value = spending_ytd['spending'].last(),
+            format = '${value:,.0f}',
+            colors = [(0, 'red'), (500_000, 'green')]
+        )
+
+        projected = pn.indicators.Number(
+            name = 'Projected Spend',
+            value = estimate_spending(spending_ytd),
+            format = '${value:,.0f}',
+            colors = [(0, 'white'), (500_000, 'grey')]
+        )
+
+        tiltpmt = pn.indicators.Number(
+            name = 'Tilt PMT',
+            value = get_last(tilt_portfolio_target(raw_pmt), 'pmt'),
+            format = '${value:,.0f}',
+            colors = [(0, 'red'), (500_000, 'green')]
+        )
+
+        rawpmt = pn.indicators.Number(
+            name = 'Raw PMT',
+            value = get_last(raw_pmt, 'pmt'),
+            format = '${value:,.0f}',
+            colors = [(0, 'white'), (500_000, 'grey')]
+        )
+
+        return (ytd, projected, tiltpmt, rawpmt)
+
+    pn.GridBox(*_make_indicators(), ncols=2)
+    return
+
+
+@app.cell
+def _(run_query):
+    def get_holdings():
+        df = run_query(f"""
+    SELECT
+        units(sum(position)) as units
+    WHERE
+        account in (select account from #accounts where open.meta['include_in_dash'] = 'true')
+    """)
+
+        # the column names are 'units (VTI)' and we just want 'VTI'
+        df = df.rename(lambda c: c.replace('units (', '')).rename(lambda c: c.replace(')', ''))
+    
+        # Want the name to match what we capture in the events table.
+        # Note that VEU's dividends are tracked in USD.
+        return df.rename({'VEU_AX': 'VEU'})
+
+    return (get_holdings,)
+
+
+@app.cell
+def _(get_holdings, math, mo, pl, run_query, today):
+    def estimate_dividends():
+        df = run_query(f"""
+        select date,description from #events where type = 'dividend'
+        """)
+        df = df.with_columns(pl.col("description").str.split_exact(':', 1))
+        df = df.with_columns(pl.col("description").struct.rename_fields(['etf', 'dividend'])).unnest('description')
+        df = df.with_columns(pl.col('dividend').str.strip_chars())
+        df = df.with_columns(pl.col('dividend').cast(pl.Decimal(10, 6)))
+        df = df.with_columns(pl.col('date').dt.quarter().alias('q'))
+    
+        # we may need to massage some of the Quarters.
+        # If their ex-div date is very close to the end of a quarter (e.g. December 30)
+        # then the actual pay date recorded in beancount may be in the following quarter (e.g. January 3)
+        # So for anything date whose Month is 1, 4, 7, 10 we use the previous quarter.
+        # That is: January payments become Q4 dividends, April payments become Q2 dividends, and so on.
+        df = df.with_columns(pl.when(pl.col('date').dt.month().is_in([1, 4, 7, 10]))
+                        .then(pl.col('q') - 1)
+                        .otherwise(pl.col('q')))
+    
+        # only use the most recent 2 years (8 quarters)
+        df = df.sort('date', descending=True).group_by('etf').tail(8)
+    
+        # This gets the average dividend for each quarter for each ETF
+        df = df.group_by('etf', 'q').mean()
+    
+        # we need to transpose it so we can join to it
+        hold = get_holdings().transpose(include_header=True, column_names=['holding']).rename({'column': 'etf'})
+    
+        df = df.join(hold, on='etf')
+        df = df.with_columns(pl.col('dividend').mul(pl.col('holding')).alias('div_amt'))
+    
+        return df.group_by('q').agg(pl.col('div_amt').sum())
+
+    _est = estimate_dividends()
+
+    todays_quarter = math.floor((today.month - 1) / 3) + 1
+
+    _div_next_q = _est.filter(pl.col('q') == todays_quarter)['div_amt'].item()
+    _div_annual = _est.sum()['div_amt'].item()
+
+    mo.hstack([mo.md('# Estimated Dividends'),
+              mo.md(f"Next Q{todays_quarter}: ${_div_next_q:,.0f}").style(),
+              mo.md(f"Year: ${_div_annual:,.0f}").style()])
     return
 
 
