@@ -1,7 +1,11 @@
 import polars as pl
 import datetime
+import os.path
 
-def load_excel(filename):
+def load_excel(name):
+    location = os.path.dirname(os.path.realpath(__file__))
+    filename = os.path.join(location, 'soa-lifetables', name)
+
     df = pl.read_excel(filename).slice(offset=21)
     df.columns = ['age', 'qx']
     df = df.with_columns(pl.col('age').cast(pl.Int64),
@@ -27,10 +31,10 @@ def load_excel(filename):
     df = df.with_columns(px = 1 - pl.col('qx'))
     return df
 
-male_anb_2012_iam = load_excel('soa-lifetables/t2581.xls')
-female_anb_2012_iam = load_excel('soa-lifetables/t2582.xls')
-projection_scale_g2_male = load_excel('soa-lifetables/t2583.xls')
-projection_scale_g2_female = load_excel('soa-lifetables/t2584.xls')
+male_anb_2012_iam = load_excel('t2581.xls')
+female_anb_2012_iam = load_excel('t2582.xls')
+projection_scale_g2_male = load_excel('t2583.xls')
+projection_scale_g2_female = load_excel('t2584.xls')
 
 def calculate_life_table(df):
     radix = 100_000
