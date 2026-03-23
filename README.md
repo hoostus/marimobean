@@ -1,6 +1,10 @@
 ![screen shot of PNL notebook](https://github.com/hoostus/marimobean/blob/main/screenshot-1.png?raw=true)
 ![screen shot of Annual Expense Comparison notebook](https://github.com/hoostus/marimobean/blob/main/screenshot-2.png?raw=true)
 
+# Test it in Molab!
+
+[![Open in molab](https://marimo.io/molab-shield.svg)](https://molab.marimo.io/github/hoostus/marimobean/blob/main/pnl.py)
+
 # Quickstart
 
 1. Install uv, if not already installed.
