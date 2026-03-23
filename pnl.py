@@ -200,6 +200,8 @@ def _():
     from beancount.parser import printer
     from beanquery.query import run_query as run_bql_query
 
+    from great_tables import GT
+
     import datetime
     import dateutil.rrule
     from pathlib import Path
