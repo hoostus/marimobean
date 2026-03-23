@@ -130,7 +130,12 @@ def _(currency, datetime, dateutil, end_year, pl, run_query, start_year):
             where date <= {_date_iso} AND account ~ 'Assets|Liabilities'
         """
         _df = run_query(_q)
-        _nws.append((_date_iso, _df['amount (USD)'].item()))
+        if _df.is_empty() or 'amount (USD)' not in _df.columns:
+            value = 0.00
+            print(f"No 'amount (USD)' found for {_date_iso}")
+        else:
+            value = _df['amount (USD)'].item()
+        _nws.append((_date_iso, value))
 
     nw_df = pl.DataFrame(data=_nws,
                          schema=['date', 'amount'],
