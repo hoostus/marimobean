@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.20.4"
+__generated_with = "0.21.1"
 app = marimo.App(width="medium")
 
 
@@ -171,9 +171,24 @@ def _(entries, options, pl, run_bql_query):
 
 
 @app.cell(hide_code=True)
-def _(beancount_file, load_file, printer):
-    entries, _errors, options = load_file(beancount_file)
-    printer.print_errors(_errors)
+def _(beancount_file, load_file, load_string, mo, printer):
+    # If we are running in molab then fetch an example beancount file from github
+    location = mo.notebook_location()
+    # Check if the location is a string containing the molab domain
+    is_molab = location is not None and "molab.marimo.io" in str(location)
+    if is_molab:
+        import requests
+        r = requests.get('https://raw.githubusercontent.com/hoostus/marimobean/refs/heads/main/budgets-example.beancount')
+        r.raise_for_status()
+        entries, _errors, options = load_string(r.text)
+    else:
+        entries, _errors, options = load_file(beancount_file)
+        printer.print_errors(_errors)
+
+    mo.md(f""" /// Attention | Loading beancount file from github.
+    Ignoring the beancount file specified in the file and loading
+    remotely from github as we have determined we are running in Molab.
+    """) if is_molab else None
     return entries, options
 
 
@@ -183,7 +198,7 @@ def _():
     import altair as alt
     import polars as pl
 
-    from beancount.loader import load_file
+    from beancount.loader import load_file, load_string
     from beancount.parser import printer
     from beanquery.query import run_query as run_bql_query
 
@@ -192,7 +207,17 @@ def _():
     from pathlib import Path
 
     home_dir = Path.home()
-    return alt, datetime, dateutil, load_file, mo, pl, printer, run_bql_query
+    return (
+        alt,
+        datetime,
+        dateutil,
+        load_file,
+        load_string,
+        mo,
+        pl,
+        printer,
+        run_bql_query,
+    )
 
 
 if __name__ == "__main__":
