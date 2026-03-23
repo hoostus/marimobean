@@ -171,11 +171,9 @@ def _(entries, options, pl, run_bql_query):
 
 
 @app.cell(hide_code=True)
-def _(beancount_file, load_file, load_string, mo, printer):
+def _(beancount_file, load_file, load_string, mo, os, printer):
     # If we are running in molab then fetch an example beancount file from github
-    location = mo.notebook_location()
-    # Check if the location is a string containing the molab domain
-    is_molab = location is not None and "molab.marimo.io" in str(location)
+    is_molab = 'MODAL_TASK_ID' in os.environ
     if is_molab:
         import requests
         r = requests.get('https://raw.githubusercontent.com/hoostus/marimobean/refs/heads/main/budgets-example.beancount')
@@ -205,6 +203,7 @@ def _():
     import datetime
     import dateutil.rrule
     from pathlib import Path
+    import os
 
     home_dir = Path.home()
     return (
@@ -214,6 +213,7 @@ def _():
         load_file,
         load_string,
         mo,
+        os,
         pl,
         printer,
         run_bql_query,
