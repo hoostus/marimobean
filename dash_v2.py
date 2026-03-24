@@ -5,6 +5,14 @@ app = marimo.App(width="medium")
 
 
 @app.cell
+def _():
+    # This has tons of assumptions embedded in it for my own personal usage.
+    # It won't work on any of the example beancount files. But you can look
+    # through it as an example of an overly complicated real-world usage.
+    return
+
+
+@app.cell
 def _(beancount_loader_errors, mo, printer):
     # Sanity check our beancount file.
     # Does everything have a payee? (./problems.sh)
