@@ -5,6 +5,47 @@ app = marimo.App(width="medium")
 
 
 @app.cell
+def _(entries):
+    from beancount.core import inventory, convert
+    from beancount.core.data import Transaction, Commodity, Open, Balance, Price, Event
+
+    import collections
+
+    commodities = set()
+    ignored_currencies = set(['USD', 'IRAUSD', 'VACHR'])
+    inv = inventory.Inventory()
+    inv_dates = {}
+
+    # this doesn't work....there could be multiple things on a single day
+    # need to coalesce across everything on a given day. ugh.
+
+    for entry in entries:
+        if isinstance(entry, Transaction):
+            date = entry.date
+            for p in entry.postings:
+                if p.units.currency not in ignored_currencies:
+                    inv.add_amount(p.units)
+                    if not inv.is_empty():
+                        p = {}
+                        for position in inv.get_positions():
+                            p[position.units.currency] = position.units.number
+                        inv_dates[date] = p
+        elif isinstance(entry, Commodity):
+            # there shouldn't be any duplicates here but use a set
+            # just in case
+            commodities.add(entry.currency)
+        elif isinstance(entry, Open): pass
+        elif isinstance(entry, Price): pass
+        elif isinstance(entry, Balance): pass
+        elif isinstance(entry, Event): pass
+        else:
+            print('Unknown type: ', entry)
+
+    inv_dates
+    return
+
+
+@app.cell
 def _(run_query):
     prices = run_query(f"""
         select * from #prices
