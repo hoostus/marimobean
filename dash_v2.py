@@ -172,7 +172,7 @@ def _(estimate_spending, pn, raw_pmt, spending_ytd, tilt_portfolio_target):
 
 @app.cell
 def _(get_holdings, math, mo, pl, run_query, today):
-    def estimate_dividends():
+    def build_dividends():
         df = run_query(f"""
         select date,description from #events where type = 'dividend'
         """)
@@ -191,8 +191,12 @@ def _(get_holdings, math, mo, pl, run_query, today):
                         .then(pl.col('q') - 1)
                         .otherwise(pl.col('q')))
 
+        return df
+
+    def estimate_dividends(quarters=8):
+        df = build_dividends()
         # only use the most recent 2 years (8 quarters)
-        df = df.sort('date', descending=True).group_by('etf').tail(8)
+        df = df.sort('date', descending=True).group_by('etf').head(quarters)
 
         # This gets the average dividend for each quarter for each ETF
         df = df.group_by('etf', 'q').mean()
@@ -212,7 +216,7 @@ def _(get_holdings, math, mo, pl, run_query, today):
     _div_next_q = _est.filter(pl.col('q') == todays_quarter)['div_amt'].item()
     _div_annual = _est.sum()['div_amt'].item()
 
-    mo.hstack([mo.md('# Estimated Dividends'),
+    mo.hstack([mo.md('# Estimated Dividends (USD)'),
               mo.md(f"Next Q{todays_quarter}: ${_div_next_q:,.0f}").style(),
               mo.md(f"Year: ${_div_annual:,.0f}").style()])
     return
