@@ -171,7 +171,7 @@ def _(estimate_spending, pn, raw_pmt, spending_ytd, tilt_portfolio_target):
 
 
 @app.cell
-def _(get_holdings, math, mo, pl, run_query, today):
+def _(datetime, get_holdings, math, mo, pl, run_query, today):
     def build_dividends():
         df = run_query(f"""
         select date,description from #events where type = 'dividend'
@@ -198,12 +198,20 @@ def _(get_holdings, math, mo, pl, run_query, today):
     # 24 months it will be the 12-month average.
     def calc_dividends(start, end):
         df = build_dividends().filter(pl.col('date').is_between(start, end)).group_by('etf', 'q').mean()
-    
+
         hold = get_holdings().transpose(include_header=True, column_names=['holding']).rename({'column': 'etf'})
-    
+
         df = df.join(hold, on='etf')
         df = df.with_columns(pl.col('dividend').mul(pl.col('holding')).alias('div_amt'))
         return df.group_by('q').agg(pl.col('div_amt').sum())
+
+    todays_quarter = math.floor((today.month - 1) / 3) + 1
+
+    # this isn't actually the start of the quarter. we really mean
+    # "a little before the next quarter starts" so we capture any
+    # dividends that show up days/weeks late
+    divs_payable = datetime.date(today.year, ((todays_quarter - 1) * 3) + 3, 1)
+    prev_divs_payable = pl.DataFrame({"date": [divs_payable]}).with_columns(pl.col('date').dt.offset_by('-3mo')).item()
 
     # The start and end dates a little tricky because of when dividends actually arrive: sometimes
     # a few days after the quarter has technically ended
@@ -212,19 +220,22 @@ def _(get_holdings, math, mo, pl, run_query, today):
         pl.lit(today).dt.offset_by('-13mo')
     )
 
-    _current_yr = calc_dividends(
-        pl.lit(today).dt.offset_by('-13mo'),
-        today
-    )
-
     _2yr_avg = calc_dividends(
         pl.lit(today).dt.offset_by('-25mo'),
-        today
+        divs_payable
+    )
+
+    _current_yr = calc_dividends(
+        pl.lit(today).dt.offset_by('-13mo'),
+        divs_payable
+    )
+
+    _prev_qtr = calc_dividends(
+        prev_divs_payable,
+        divs_payable
     )
 
     _est = _2yr_avg
-
-    todays_quarter = math.floor((today.month - 1) / 3) + 1
 
     _div_next_q = _est.filter(pl.col('q') == todays_quarter)['div_amt'].item()
     _div_annual = _est.sum()['div_amt'].item()
