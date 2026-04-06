@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.21.1"
+__generated_with = "0.22.4"
 app = marimo.App(width="medium")
 
 
@@ -33,7 +33,7 @@ def _(run_query):
     where
         year = year(today())
         and payee is NULL
-        and flag != 'p'
+        and flag != 'P'
     order by
         lineno asc
     """)
@@ -130,7 +130,15 @@ def _(alt, build_progress, mo):
 
 
 @app.cell
-def _(estimate_spending, pn, raw_pmt, spending_ytd, tilt_portfolio_target):
+def _(
+    estimate_spending,
+    pl,
+    pn,
+    raw_pmt,
+    spending_ytd,
+    tilt_income_target,
+    tilt_portfolio_target,
+):
     def _make_indicators():
         def get_last(df, field):
             n = df.sort('date')[field].last()
@@ -150,9 +158,17 @@ def _(estimate_spending, pn, raw_pmt, spending_ytd, tilt_portfolio_target):
             colors = [(0, 'white'), (500_000, 'grey')]
         )
 
+        # This really needs to be the min(portfolio, income)
+        _df1 = tilt_portfolio_target(raw_pmt)
+        _df2 = tilt_income_target(raw_pmt)
+
+        _min_pmt = _df1.with_columns(
+            min_pmt = pl.min_horizontal('pmt', _df2['pmt'])
+        )
+
         tiltpmt = pn.indicators.Number(
             name = 'Tilt PMT',
-            value = get_last(tilt_portfolio_target(raw_pmt), 'pmt'),
+            value = get_last(_min_pmt, 'min_pmt'),
             format = '${value:,.0f}',
             colors = [(0, 'red'), (500_000, 'green')]
         )
@@ -382,6 +398,10 @@ def _(datetime, mo, pl, today):
             interval="1d", 
             eager=True
         ).alias("date").to_frame()
+
+        # On Feb-23-2026 lowered the expected returns from 3.2 to 3.1, so reflect that here.
+        # this also shows how you could (in theory) have a more dynamic expected returned
+        # e.g. 1/CAPE10 calculated monthly
         df = df.with_columns(
             rate = pl.when(pl.col("date") < datetime.date(datetime.date.today().year, 2, 23))
             .then(pl.lit(0.032))
