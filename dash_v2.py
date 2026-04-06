@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.4"
+__generated_with = "0.21.1"
 app = marimo.App(width="medium")
 
 
@@ -390,8 +390,6 @@ def _(datetime, mo, pl, today):
 
     mo.md(""" /// Attention | Expected returns only valid for 2026. Update them!
     """) if today.year != 2026 else None
-
-    build_expected_returns_dataframe()
     return (build_expected_returns_dataframe,)
 
 
