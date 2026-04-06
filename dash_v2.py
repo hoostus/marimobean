@@ -26,6 +26,41 @@ def _(beancount_loader_errors, mo, printer):
 
 
 @app.cell
+def _(mo, pl, run_query, today):
+    # We can check to make sure the beancount price_map is reasonably up to date (i.e. within 5 days)
+    _df = run_query(f"""
+        select * from #prices;
+    """)
+
+    _recent = _df.sort('date').group_by('currency').last()
+    _stale = _recent.filter(pl.col('date') < today - pl.duration(days=5))
+
+    # get the list of current holdings and compare them against this stale list
+
+    # beancount returns anything we've ever held (just with a 0 quantity).
+    # we only care about current holdings so strip out anything with 0 quantity.
+    _holdings = run_query(f"""
+    select
+        sum(number) as units,
+        currency
+    group by currency
+    """).filter(pl.col('units') > 0)
+
+    _stale_currencies = _stale.join(_holdings, on='currency')['currency']
+
+    # These are things we know don't update frequently, so exclude them.
+    _ignore = ['VND', 'HOUSE_VN_DBP', 'HOUSE_AUS_HAY']
+
+    _s = _stale_currencies.filter(~_stale_currencies.is_in(_ignore))
+    _str = _s.str.join(delimiter='\n- ').item()
+
+    mo.md(f"""/// Attention | Stale price data.
+    - {_str}
+    """) if not _s.is_empty() else None
+    return
+
+
+@app.cell
 def _(run_query):
     _p = run_query(f"""
     select
@@ -43,16 +78,8 @@ def _(run_query):
 
 
 @app.cell
-def _(
-    calculate_spend,
-    mo,
-    pl,
-    raw_pmt,
-    spending_ytd,
-    tilt_portfolio_target,
-    today,
-):
-    _df = calculate_spend(tilt_portfolio_target(raw_pmt)).join(
+def _(calculate_spend, min_pmt, mo, pl, spending_ytd, today):
+    _df = calculate_spend(min_pmt).join(
         spending_ytd,
         on='date',
         how='left').sort('date').fill_null(strategy='forward').fill_null(0).with_columns(
@@ -130,15 +157,7 @@ def _(alt, build_progress, mo):
 
 
 @app.cell
-def _(
-    estimate_spending,
-    pl,
-    pn,
-    raw_pmt,
-    spending_ytd,
-    tilt_income_target,
-    tilt_portfolio_target,
-):
+def _(estimate_spending, min_pmt, pn, raw_pmt, spending_ytd):
     def _make_indicators():
         def get_last(df, field):
             n = df.sort('date')[field].last()
@@ -158,17 +177,9 @@ def _(
             colors = [(0, 'white'), (500_000, 'grey')]
         )
 
-        # This really needs to be the min(portfolio, income)
-        _df1 = tilt_portfolio_target(raw_pmt)
-        _df2 = tilt_income_target(raw_pmt)
-
-        _min_pmt = _df1.with_columns(
-            min_pmt = pl.min_horizontal('pmt', _df2['pmt'])
-        )
-
         tiltpmt = pn.indicators.Number(
             name = 'Tilt PMT',
-            value = get_last(_min_pmt, 'min_pmt'),
+            value = get_last(min_pmt, 'pmt'),
             format = '${value:,.0f}',
             colors = [(0, 'red'), (500_000, 'green')]
         )
@@ -322,41 +333,6 @@ def _(datetime, pl):
 
 
 @app.cell
-def _(mo, pl, run_query, today):
-    # We can check to make sure the beancount price_map is reasonably up to date (i.e. within 5 days)
-    _df = run_query(f"""
-        select * from #prices;
-    """)
-
-    _recent = _df.sort('date').group_by('currency').last()
-    _stale = _recent.filter(pl.col('date') < today - pl.duration(days=5))
-
-    # get the list of current holdings and compare them against this stale list
-
-    # beancount returns anything we've ever held (just with a 0 quantity).
-    # we only care about current holdings so strip out anything with 0 quantity.
-    _holdings = run_query(f"""
-    select
-        sum(number) as units,
-        currency
-    group by currency
-    """).filter(pl.col('units') > 0)
-
-    _stale_currencies = _stale.join(_holdings, on='currency')['currency']
-
-    # These are things we know don't update frequently, so exclude them.
-    _ignore = ['VND', 'HOUSE_VN_DBP', 'HOUSE_AUS_HAY']
-
-    _s = _stale_currencies.filter(~_stale_currencies.is_in(_ignore))
-    _str = _s.str.join(delimiter='\n- ').item()
-
-    mo.md(f"""/// Attention | Stale price data.
-    - {_str}
-    """) if not _s.is_empty() else None
-    return
-
-
-@app.cell
 def _(
     CURRENCY,
     beancount,
@@ -399,18 +375,23 @@ def _(datetime, mo, pl, today):
             eager=True
         ).alias("date").to_frame()
 
-        # On Feb-23-2026 lowered the expected returns from 3.2 to 3.1, so reflect that here.
+        # Feb-23-2026 lowered the expected returns from 3.2 to 3.1, so reflect that here.
+        # Apr-7-2026 lowered from 3.1 to 3.0, should be the final value, I think.    
         # this also shows how you could (in theory) have a more dynamic expected returned
         # e.g. 1/CAPE10 calculated monthly
         df = df.with_columns(
-            rate = pl.when(pl.col("date") < datetime.date(datetime.date.today().year, 2, 23))
+            rate = pl.when(pl.col("date") < datetime.date(2026, 2, 23))
             .then(pl.lit(0.032))
-            .otherwise(pl.lit(0.031))
+            .when(pl.col("date") < datetime.date(2026, 4, 1))
+            .then(pl.lit(0.031))
+            .otherwise(pl.lit(0.030))
         )
         return df
 
     mo.md(""" /// Attention | Expected returns only valid for 2026. Update them!
     """) if today.year != 2026 else None
+
+    build_expected_returns_dataframe()
     return (build_expected_returns_dataframe,)
 
 
@@ -459,7 +440,7 @@ def _(
 
 
 @app.cell
-def _(pl, pv):
+def _(pl, pv, raw_pmt):
     # We can 'tilt' the resulting PMT calculation towards either portfolio stability or income stability.
 
     def tilt_portfolio(df, tilt_amt):
@@ -474,8 +455,13 @@ def _(pl, pv):
         target = 7_000_000
         return tilt_portfolio(df.with_columns(target = pl.lit(target)), tilt)
 
+    # 7-Apr-2026: Set income to 150_000
+    # That seems roughly what our steady-state spending is
+    # (minus vacation and other expenses like that)
+    # Using this as a target seems to make more sense than
+    # some arbitrary big number
     def target_from_income(pmt):
-        target_income = 250_000
+        target_income = 150_000 #250_000
         target = pv(pmt['rate'], pmt['nper'], -target_income, 0)
         return target
 
@@ -484,7 +470,19 @@ def _(pl, pv):
         target = target_from_income(pmt)
         return tilt_portfolio(pmt.with_columns(target = target), tilt)
 
-    return target_from_income, tilt_income_target, tilt_portfolio_target
+    # We want to find the minimum of the portfolio tilt and the income tilt
+    _df1 = tilt_portfolio_target(raw_pmt)
+    _df2 = tilt_income_target(raw_pmt)
+
+    min_pmt = _df1.with_columns(
+        pmt = pl.min_horizontal('pmt', _df2['pmt'])
+    )
+    return (
+        min_pmt,
+        target_from_income,
+        tilt_income_target,
+        tilt_portfolio_target,
+    )
 
 
 @app.cell
