@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.21.1"
+__generated_with = "0.22.4"
 app = marimo.App(width="medium")
 
 
@@ -194,93 +194,6 @@ def _(estimate_spending, min_pmt, pn, raw_pmt, spending_ytd):
         return (ytd, projected, tiltpmt, rawpmt)
 
     pn.GridBox(*_make_indicators(), ncols=2)
-    return
-
-
-@app.cell
-def _(datetime, get_holdings, math, mo, pl, run_query, today):
-    def build_dividends():
-        df = run_query(f"""
-        select date,description from #events where type = 'dividend'
-        """)
-        df = df.with_columns(pl.col("description").str.split_exact(':', 1))
-        df = df.with_columns(pl.col("description").struct.rename_fields(['etf', 'dividend'])).unnest('description')
-        df = df.with_columns(pl.col('dividend').str.strip_chars())
-        df = df.with_columns(pl.col('dividend').cast(pl.Decimal(10, 6)))
-        df = df.with_columns(pl.col('date').dt.quarter().alias('q'))
-
-        # we may need to massage some of the Quarters.
-        # If their ex-div date is very close to the end of a quarter (e.g. December 30)
-        # then the actual pay date recorded in beancount may be in the following quarter (e.g. January 3)
-        # So for anything date whose Month is 1, 4, 7, 10 we use the previous quarter.
-        # That is: January payments become Q4 dividends, April payments become Q2 dividends, and so on.
-        df = df.with_columns(pl.when(pl.col('date').dt.month().is_in([1, 4, 7, 10]))
-                        .then(pl.col('q') - 1)
-                        .otherwise(pl.col('q')))
-
-        return df
-
-    # This will create an annual average. So if you specify exactly one year,
-    # then it is the actual dividends for that 12 month range. But if you specify
-    # 24 months it will be the 12-month average.
-    def calc_dividends(start, end):
-        df = build_dividends().filter(pl.col('date').is_between(start, end)).group_by('etf', 'q').mean()
-
-        hold = get_holdings().transpose(include_header=True, column_names=['holding']).rename({'column': 'etf'})
-
-        df = df.join(hold, on='etf')
-        df = df.with_columns(pl.col('dividend').mul(pl.col('holding')).alias('div_amt'))
-        return df.group_by('q').agg(pl.col('div_amt').sum())
-
-    todays_quarter = math.floor((today.month - 1) / 3) + 1
-
-    # this isn't actually the start of the quarter. we really mean
-    # "a little before the next quarter starts" so we capture any
-    # dividends that show up days/weeks late
-    divs_payable = datetime.date(today.year, ((todays_quarter - 1) * 3) + 3, 1)
-    prev_divs_payable = pl.DataFrame({"date": [divs_payable]}).with_columns(pl.col('date').dt.offset_by('-3mo')).item()
-
-    # The start and end dates a little tricky because of when dividends actually arrive: sometimes
-    # a few days after the quarter has technically ended
-    _1yr_ago = calc_dividends(
-        pl.lit(today).dt.offset_by('-25mo'),
-        pl.lit(today).dt.offset_by('-13mo')
-    )
-
-    _2yr_avg = calc_dividends(
-        pl.lit(today).dt.offset_by('-25mo'),
-        divs_payable
-    )
-
-    _current_yr = calc_dividends(
-        pl.lit(today).dt.offset_by('-13mo'),
-        divs_payable
-    )
-
-    _prev_qtr = calc_dividends(
-        prev_divs_payable,
-        divs_payable
-    )
-
-    _est = _2yr_avg
-
-    _div_next_q = _est.filter(pl.col('q') == todays_quarter)['div_amt'].item()
-    _div_annual = _est.sum()['div_amt'].item()
-
-    _green_up = mo.icon('lucide:arrow-big-up', color='green', size=24)
-    _red_down = mo.icon('lucide:arrow-big-down', color='red', size=24)
-
-    # This calculates the annual change in our dividends
-    _change = (_current_yr.sum() / _1yr_ago.sum() - 1)['div_amt'].item()
-    if _change > 0:
-        _delta = mo.md(f"""{_green_up}{100 * _change:,.1f}%""")
-    else:
-        _delta = mo.md(f"""{_red_down} {100 * _change:,.1f}%""")
-
-    mo.hstack([mo.md('# Estimated Dividends (USD)'),
-               _delta,
-               mo.md(f"Next Q{todays_quarter}: ${_div_next_q:,.0f}").style(),
-               mo.md(f"Year: ${_div_annual:,.0f}").style()], align='center')
     return
 
 
@@ -712,6 +625,93 @@ def _(datetime, pl, run_query, today):
 
     #estimate_spending()
     return (estimate_spending,)
+
+
+@app.cell
+def _(datetime, get_holdings, math, mo, pl, run_query, today):
+    def build_dividends():
+        df = run_query(f"""
+        select date,description from #events where type = 'dividend'
+        """)
+        df = df.with_columns(pl.col("description").str.split_exact(':', 1))
+        df = df.with_columns(pl.col("description").struct.rename_fields(['etf', 'dividend'])).unnest('description')
+        df = df.with_columns(pl.col('dividend').str.strip_chars())
+        df = df.with_columns(pl.col('dividend').cast(pl.Decimal(10, 6)))
+        df = df.with_columns(pl.col('date').dt.quarter().alias('q'))
+
+        # we may need to massage some of the Quarters.
+        # If their ex-div date is very close to the end of a quarter (e.g. December 30)
+        # then the actual pay date recorded in beancount may be in the following quarter (e.g. January 3)
+        # So for anything date whose Month is 1, 4, 7, 10 we use the previous quarter.
+        # That is: January payments become Q4 dividends, April payments become Q2 dividends, and so on.
+        df = df.with_columns(pl.when(pl.col('date').dt.month().is_in([1, 4, 7, 10]))
+                        .then(pl.col('q') - 1)
+                        .otherwise(pl.col('q')))
+
+        return df
+
+    # This will create an annual average. So if you specify exactly one year,
+    # then it is the actual dividends for that 12 month range. But if you specify
+    # 24 months it will be the 12-month average.
+    def calc_dividends(start, end):
+        df = build_dividends().filter(pl.col('date').is_between(start, end)).group_by('etf', 'q').mean()
+
+        hold = get_holdings().transpose(include_header=True, column_names=['holding']).rename({'column': 'etf'})
+
+        df = df.join(hold, on='etf')
+        df = df.with_columns(pl.col('dividend').mul(pl.col('holding')).alias('div_amt'))
+        return df.group_by('q').agg(pl.col('div_amt').sum())
+
+    todays_quarter = math.floor((today.month - 1) / 3) + 1
+
+    # this isn't actually the start of the quarter. we really mean
+    # "a little before the next quarter starts" so we capture any
+    # dividends that show up days/weeks late
+    divs_payable = datetime.date(today.year, ((todays_quarter - 1) * 3) + 3, 1)
+    prev_divs_payable = pl.DataFrame({"date": [divs_payable]}).with_columns(pl.col('date').dt.offset_by('-3mo')).item()
+
+    # The start and end dates a little tricky because of when dividends actually arrive: sometimes
+    # a few days after the quarter has technically ended
+    _1yr_ago = calc_dividends(
+        pl.lit(today).dt.offset_by('-25mo'),
+        pl.lit(today).dt.offset_by('-13mo')
+    )
+
+    _2yr_avg = calc_dividends(
+        pl.lit(today).dt.offset_by('-25mo'),
+        divs_payable
+    )
+
+    _current_yr = calc_dividends(
+        pl.lit(today).dt.offset_by('-13mo'),
+        divs_payable
+    )
+
+    _prev_qtr = calc_dividends(
+        prev_divs_payable,
+        divs_payable
+    )
+
+    _est = _2yr_avg
+
+    _div_next_q = _est.filter(pl.col('q') == todays_quarter)['div_amt'].item()
+    _div_annual = _est.sum()['div_amt'].item()
+
+    _green_up = mo.icon('lucide:arrow-big-up', color='green', size=24)
+    _red_down = mo.icon('lucide:arrow-big-down', color='red', size=24)
+
+    # This calculates the annual change in our dividends
+    _change = (_current_yr.sum() / _1yr_ago.sum() - 1)['div_amt'].item()
+    if _change > 0:
+        _delta = mo.md(f"""{_green_up}{100 * _change:,.1f}%""")
+    else:
+        _delta = mo.md(f"""{_red_down} {100 * _change:,.1f}%""")
+
+    mo.hstack([mo.md('# Estimated Dividends (USD)'),
+               _delta,
+               mo.md(f"Next Q{todays_quarter}: ${_div_next_q:,.0f}").style(),
+               mo.md(f"Year: ${_div_annual:,.0f}").style()], align='center')
+    return
 
 
 @app.cell
