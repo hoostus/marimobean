@@ -1,6 +1,6 @@
 import marimo
 
-__generated_with = "0.22.4"
+__generated_with = "0.23.0"
 app = marimo.App(width="medium")
 
 
@@ -373,7 +373,7 @@ def _(pl, pv, raw_pmt):
     # some arbitrary big number
     def target_from_income(pmt):
         target_income = 150_000 #250_000
-        target = pv(pmt['rate'], pmt['nper'], -target_income, 0)
+        target = pv(pmt['rate'], pmt['nper'], -target_income, fv=0, when='begin')
         return target
 
     def tilt_income_target(pmt):
@@ -462,7 +462,7 @@ def _(
 
         chart = alt.Chart(source).mark_line(point=True).encode(
             x='date',
-            y=alt.X('value', title='Amount $').scale(domainMin=150_000),
+            y=alt.Y('value', title='Amount $').scale(domainMin=150_000),
             color='variable')
 
         tooltips = alt.Chart(source).transform_pivot(
@@ -585,6 +585,29 @@ def _(
         return chart + tooltips
 
     mo.ui.altair_chart(_chart_excess())
+    return
+
+
+@app.cell
+def _(bequest, pl, pmt, raw_pmt, tilt_income_target):
+    n_rows = 20
+    step = 100_000
+
+    _rounded = raw_pmt.tail(1).with_columns((pl.col('net_worth') / 100_000).floor() * 100_000)
+
+    _df = _rounded.select([pl.col('nper').first(), pl.col('rate').first(),
+        (pl.col('net_worth') - pl.int_range(0, n_rows) * step).alias('net_worth')
+    ])
+
+    _pmts = -pmt(rate = _df['rate'],
+        nper = _df['nper'],
+        fv = bequest,
+        pv = _df['net_worth'],
+        when='begin')
+    _raw_pmt = _df.with_columns(pmt = _pmts)
+    _tilt = tilt_income_target(_raw_pmt)
+
+    #_tilt.filter(pl.col('net_worth') > pl.col('target'))
     return
 
 
